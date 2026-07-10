@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ticketing-bot
+  labels:
+    app: ticketing-bot
+spec:
+  replicas: 1 # Discord gateway session — do not scale horizontally without sharding
+  selector:
+    matchLabels:
+      app: ticketing-bot
+  template:
+    metadata:
+      labels:
+        app: ticketing-bot
+    spec:
+      containers:
+        - name: bot
+          image: ghcr.io/ORG/ticketing-bot:latest
+          envFrom:
+            - configMapRef:
+                name: ticketing-bot-config
+            - secretRef:
+                name: ticketing-bot-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

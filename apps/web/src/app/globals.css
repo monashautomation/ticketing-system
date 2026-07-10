@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-surface: oklch(98% 0 0);
+  --color-text: oklch(18% 0 0);
+  --color-accent: oklch(58% 0.19 255);
+}
+
+body {
+  background: var(--color-surface);
+  color: var(--color-text);
+}

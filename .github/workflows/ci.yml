@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-typecheck-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ticketing/db generate
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  build-push:
+    needs: lint-typecheck-test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        run: echo "sha=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ticketing-web:${{ steps.meta.outputs.sha }}
+            ghcr.io/${{ github.repository_owner }}/ticketing-web:latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/bot/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ticketing-bot:${{ steps.meta.outputs.sha }}
+            ghcr.io/${{ github.repository_owner }}/ticketing-bot:latest
+
+      - name: Bump image tags for ArgoCD (GitOps commit)
+        run: |
+          cd deploy/overlays/prod
+          npx --yes kustomize edit set image \
+            ghcr.io/${{ github.repository_owner }}/ticketing-web:${{ steps.meta.outputs.sha }} \
+            ghcr.io/${{ github.repository_owner }}/ticketing-bot:${{ steps.meta.outputs.sha }}
+          cd -
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(deploy): bump images to ${{ steps.meta.outputs.sha }}" || echo "nothing to commit"
+          git push
