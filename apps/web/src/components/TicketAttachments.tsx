@@ -2,6 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
+import { Loader2, Paperclip, Trash2, Upload } from 'lucide-react';
+import { buttonGhost, cardTight, errorText, mutedText } from '@/lib/styles';
+import { uploadAttachment } from '@/lib/uploadAttachment';
 
 interface Attachment {
   id: string;
@@ -34,28 +37,14 @@ export function TicketAttachments({
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleUpload(file: File) {
     setIsUploading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/tickets/${ticketId}/attachments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName: file.name, mimeType: file.type || 'application/octet-stream', sizeBytes: file.size }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? 'Failed to prepare upload');
-      }
-      const { data } = await res.json();
-      const putRes = await fetch(data.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type || 'application/octet-stream' },
-        body: file,
-      });
-      if (!putRes.ok) throw new Error('Upload to storage failed');
+      await uploadAttachment(ticketId, file);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
@@ -66,15 +55,37 @@ export function TicketAttachments({
   }
 
   async function handleDelete(attachmentId: string) {
-    await fetch(`/api/attachments/${attachmentId}`, { method: 'DELETE' });
-    router.refresh();
+    setDeletingId(attachmentId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/attachments/${attachmentId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? 'Failed to delete attachment');
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete attachment');
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
-    <div className="mb-6 rounded-lg border border-neutral-200 p-3">
+    <div className={`${cardTight} mb-6`}>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-medium">Attachments</h2>
-        <label className="cursor-pointer rounded-md bg-neutral-100 px-3 py-1.5 text-sm font-medium hover:bg-neutral-200">
+        <h2 className="flex items-center gap-1.5 text-sm font-medium text-text">
+          <Paperclip className="h-4 w-4 text-text-tertiary" />
+          Attachments
+        </h2>
+        <label
+          className={`${buttonGhost} cursor-pointer gap-1.5 border border-border transition-all hover:-translate-y-0.5`}
+        >
+          {isUploading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Upload className="h-3.5 w-3.5" />
+          )}
           {isUploading ? 'Uploading…' : 'Upload file'}
           <input
             ref={fileInputRef}
@@ -89,32 +100,42 @@ export function TicketAttachments({
         </label>
       </div>
 
-      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      {error && <p className={`mb-2 ${errorText}`}>{error}</p>}
 
-      <ul className="divide-y divide-neutral-100">
-        {attachments.map((attachment) => (
-          <li key={attachment.id} className="flex items-center justify-between py-2 text-sm">
-            <a
-              href={`/api/attachments/${attachment.id}`}
-              className="truncate hover:underline"
+      <ul className="divide-y divide-border">
+        {attachments.map((attachment, index) => {
+          const isDeleting = deletingId === attachment.id;
+          return (
+            <li
+              key={attachment.id}
+              className="animate-fade-in-up flex items-center justify-between py-2 text-sm"
+              style={{ animationDelay: `${Math.min(index, 8) * 25}ms` }}
             >
-              {attachment.fileName}
-            </a>
-            <div className="flex items-center gap-3 text-neutral-500">
-              <span>{formatBytes(attachment.sizeBytes)}</span>
-              <span>{attachment.uploadedBy.name}</span>
-              {(isAdmin || attachment.uploadedById === currentUserId) && (
-                <button
-                  onClick={() => handleDelete(attachment.id)}
-                  className="text-red-600 hover:underline"
-                >
-                  Delete
-                </button>
-              )}
-            </div>
-          </li>
-        ))}
-        {attachments.length === 0 && <p className="py-2 text-sm text-neutral-500">No attachments.</p>}
+              <a
+                href={`/api/attachments/${attachment.id}`}
+                className="truncate text-text transition-colors hover:text-accent"
+              >
+                {attachment.fileName}
+              </a>
+              <div className="flex items-center gap-3 text-text-secondary">
+                <span>{formatBytes(attachment.sizeBytes)}</span>
+                <span>{attachment.uploadedBy.name}</span>
+                {(isAdmin || attachment.uploadedById === currentUserId) && (
+                  <button
+                    onClick={() => handleDelete(attachment.id)}
+                    disabled={isDeleting}
+                    aria-label={`Delete ${attachment.fileName}`}
+                    className="inline-flex items-center gap-1 text-danger transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {isDeleting ? 'Deleting…' : 'Delete'}
+                  </button>
+                )}
+              </div>
+            </li>
+          );
+        })}
+        {attachments.length === 0 && <p className={`py-2 ${mutedText}`}>No attachments.</p>}
       </ul>
     </div>
   );

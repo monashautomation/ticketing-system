@@ -11,6 +11,7 @@ import type {
 import { AppError, NotFoundError } from '@/lib/errors';
 
 const TICKET_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
+const DISCORD_CLAIM_TTL_MS = 1000 * 60 * 30; // 30 minutes
 
 const RESOLVED_STATUSES: readonly TicketStatus[] = ['resolved', 'closed'];
 
@@ -23,10 +24,32 @@ export function isOverdue(ticket: { slaDueAt: Date | null; status: string }): bo
 export interface TicketQueueFilters {
   status?: TicketStatus;
   priority?: TicketPriority;
-  assignedToId?: string;
+  assigneeId?: string;
   tagId?: string;
   overdueOnly?: boolean;
   search?: string;
+}
+
+const ACTIVE_STATUS_GROUPS: readonly TicketStatus[] = ['open', 'escalated', 'pending', 'in_progress'];
+
+export function groupTicketsByStatus<T extends { status: string; createdAt: Date; updatedAt: Date }>(
+  tickets: T[],
+): { active: Record<(typeof ACTIVE_STATUS_GROUPS)[number], T[]>; closedOrResolved: T[] } {
+  const active = ACTIVE_STATUS_GROUPS.reduce(
+    (acc, status) => ({
+      ...acc,
+      [status]: tickets
+        .filter((t) => t.status === status)
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+    }),
+    {} as Record<(typeof ACTIVE_STATUS_GROUPS)[number], T[]>,
+  );
+
+  const closedOrResolved = tickets
+    .filter((t) => RESOLVED_STATUSES.includes(t.status as TicketStatus))
+    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+
+  return { active, closedOrResolved };
 }
 
 function hashToken(token: string): string {
@@ -35,9 +58,12 @@ function hashToken(token: string): string {
 
 export async function listTicketsForUser(userId: string, role: 'user' | 'admin') {
   return prisma.ticket.findMany({
-    where: role === 'admin' ? {} : { createdById: userId },
+    where:
+      role === 'admin'
+        ? {}
+        : { OR: [{ createdById: userId }, { watchers: { some: { id: userId } } }] },
     orderBy: { updatedAt: 'desc' },
-    include: { createdBy: true, assignedTo: true, tags: true },
+    include: { createdBy: true, assignees: true, tags: true, watchers: true },
   });
 }
 
@@ -46,7 +72,7 @@ export async function listTicketsForAdminQueue(filters: TicketQueueFilters = {})
   const where: Prisma.TicketWhereInput = {};
   if (filters.status) where.status = filters.status;
   if (filters.priority) where.priority = filters.priority;
-  if (filters.assignedToId) where.assignedToId = filters.assignedToId;
+  if (filters.assigneeId) where.assignees = { some: { id: filters.assigneeId } };
   if (filters.tagId) where.tags = { some: { id: filters.tagId } };
   if (filters.search) {
     where.title = { contains: filters.search, mode: 'insensitive' };
@@ -59,7 +85,7 @@ export async function listTicketsForAdminQueue(filters: TicketQueueFilters = {})
   return prisma.ticket.findMany({
     where,
     orderBy: { updatedAt: 'desc' },
-    include: { createdBy: true, assignedTo: true, tags: true },
+    include: { createdBy: true, assignees: true, tags: true, watchers: true },
   });
 }
 
@@ -68,8 +94,9 @@ export async function getTicketOr404(ticketId: string) {
     where: { id: ticketId },
     include: {
       createdBy: true,
-      assignedTo: true,
+      assignees: true,
       tags: true,
+      watchers: true,
       attachments: { orderBy: { createdAt: 'asc' }, include: { uploadedBy: true } },
       messages: { orderBy: { createdAt: 'asc' }, include: { author: true } },
     },
@@ -79,12 +106,16 @@ export async function getTicketOr404(ticketId: string) {
 }
 
 export function canViewTicket(
-  ticket: { createdById: string; assignedToId: string | null },
+  ticket: { createdById: string; assignees?: { id: string }[]; watchers?: { id: string }[] },
   user: { id: string; role: 'user' | 'admin' } | null,
 ): boolean {
   if (!user) return false;
   if (user.role === 'admin') return true;
-  return ticket.createdById === user.id || ticket.assignedToId === user.id;
+  return (
+    ticket.createdById === user.id ||
+    (ticket.assignees ?? []).some((a) => a.id === user.id) ||
+    (ticket.watchers ?? []).some((w) => w.id === user.id)
+  );
 }
 
 export async function verifyTicketToken(ticketId: string, token: string): Promise<boolean> {
@@ -95,18 +126,52 @@ export async function verifyTicketToken(ticketId: string, token: string): Promis
   return true;
 }
 
-export async function createTicket(userId: string, input: CreateTicketInput) {
+export async function createTicket(
+  userId: string,
+  actorRole: 'user' | 'admin',
+  input: CreateTicketInput,
+) {
+  const ccUserIds = input.ccUserIds ?? [];
+  if (ccUserIds.includes(userId)) {
+    throw new AppError('Cannot cc yourself on a ticket');
+  }
+  if (ccUserIds.length > 0) {
+    const ccUsers = await prisma.user.findMany({ where: { id: { in: ccUserIds } } });
+    if (ccUsers.length !== ccUserIds.length) throw new AppError('One or more CC users not found');
+  }
+
+  const assigneeIds = input.assigneeIds ?? [];
+  if (assigneeIds.length > 0) {
+    if (actorRole !== 'admin') {
+      throw new AppError('Only admins can assign a ticket at creation time');
+    }
+    const assignees = await prisma.user.findMany({ where: { id: { in: assigneeIds } } });
+    if (assignees.length !== assigneeIds.length || assignees.some((a) => a.role !== 'admin')) {
+      throw new AppError('Tickets can only be assigned to admins');
+    }
+  }
+
   return prisma.ticket.create({
     data: {
       title: input.title,
       description: input.description,
       priority: input.priority,
+      type: input.type,
       createdById: userId,
+      watchers: ccUserIds.length > 0 ? { connect: ccUserIds.map((id) => ({ id })) } : undefined,
+      assignees:
+        assigneeIds.length > 0 ? { connect: assigneeIds.map((id) => ({ id })) } : undefined,
     },
+    include: { watchers: true, assignees: true },
   });
 }
 
-/** Creates a ticket from a Discord interaction. Auto-links to an existing user by discordId. */
+/**
+ * Creates a ticket from a Discord interaction. Auto-links to an existing user by discordId.
+ * Unlinked Discord users get a Discord-only placeholder owner and a claim link that, once they
+ * sign in with Authentik, silently attaches their discordId to their real account (see
+ * claimDiscordAccount). Already-linked users get a direct token URL -- no login required.
+ */
 export async function createTicketFromDiscord(input: CreateInternalTicketInput) {
   const existingUser = await prisma.user.findUnique({ where: { discordId: input.discordUserId } });
 
@@ -118,6 +183,7 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput) 
         name: input.discordUsername,
         discordId: input.discordUserId,
         emailVerified: false,
+        isDiscordPlaceholder: true,
       },
     }));
 
@@ -126,10 +192,35 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput) 
       title: input.title,
       description: input.description,
       priority: input.priority,
+      type: input.type,
       createdById: owner.id,
       discordChannelId: input.discordChannelId,
     },
   });
+
+  if (owner.isDiscordPlaceholder) {
+    const rawClaimToken = randomBytes(32).toString('hex');
+    await prisma.discordClaim.upsert({
+      where: { placeholderUserId: owner.id },
+      create: {
+        placeholderUserId: owner.id,
+        tokenHash: hashToken(rawClaimToken),
+        ticketId: ticket.id,
+        expiresAt: new Date(Date.now() + DISCORD_CLAIM_TTL_MS),
+      },
+      update: {
+        tokenHash: hashToken(rawClaimToken),
+        ticketId: ticket.id,
+        expiresAt: new Date(Date.now() + DISCORD_CLAIM_TTL_MS),
+      },
+    });
+
+    return {
+      ticket,
+      path: `/link-discord/claim?token=${rawClaimToken}`,
+      isNewUser: !existingUser,
+    };
+  }
 
   const rawToken = randomBytes(32).toString('hex');
   await prisma.ticketAccessToken.create({
@@ -140,7 +231,89 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput) 
     },
   });
 
-  return { ticket, accessToken: rawToken, isNewUser: !existingUser };
+  return {
+    ticket,
+    path: `/t/${ticket.id}?token=${rawToken}`,
+    isNewUser: !existingUser,
+  };
+}
+
+/**
+ * Read-only lookup for the claim confirmation screen -- never mutates. Lets the signed-in user
+ * see which Discord account they're about to link before claimDiscordAccount is ever called.
+ */
+export async function previewDiscordClaim(token: string) {
+  const claim = await prisma.discordClaim.findUnique({
+    where: { tokenHash: hashToken(token) },
+    include: { placeholderUser: true },
+  });
+  if (!claim || claim.expiresAt < new Date()) return null;
+
+  const ticket = await prisma.ticket.findUnique({ where: { id: claim.ticketId } });
+  return {
+    discordUsername: claim.placeholderUser.name,
+    ticketTitle: ticket?.title ?? 'your ticket',
+  };
+}
+
+/**
+ * Consumes a Discord claim token for the signed-in user: reassigns everything the placeholder
+ * owned to the real account, sets discordId on the real account, and deletes the placeholder.
+ * Safe to call again with the same token from the same real user (e.g. a duplicate redirect).
+ *
+ * Only call this from an explicit, user-confirmed POST/Server Action -- never from a page GET.
+ * The claim token alone isn't proof of intent: anyone who has it (e.g. the Discord user it was
+ * issued to) could get a signed-in victim to open it via a plain link and silently link their
+ * own discordId onto the victim's account. The confirmation screen in the claim page is the
+ * actual CSRF defense; this function just does the write once the user has agreed.
+ */
+export async function claimDiscordAccount(token: string, realUserId: string) {
+  const tokenHash = hashToken(token);
+  const claim = await prisma.discordClaim.findUnique({
+    where: { tokenHash },
+    include: { placeholderUser: true },
+  });
+  if (!claim || claim.expiresAt < new Date()) {
+    throw new AppError('This link has expired. Open a new ticket from Discord to get a fresh one.');
+  }
+
+  const placeholder = claim.placeholderUser;
+  if (placeholder.id === realUserId) {
+    // Already claimed by this exact session (e.g. a page refresh); nothing left to do.
+    await prisma.discordClaim.delete({ where: { id: claim.id } }).catch(() => {});
+    return { ticketId: claim.ticketId };
+  }
+
+  const realUser = await prisma.user.findUnique({ where: { id: realUserId } });
+  if (!realUser) throw new NotFoundError('User not found');
+
+  if (realUser.discordId && realUser.discordId !== placeholder.discordId) {
+    throw new AppError('Your account is already linked to a different Discord user');
+  }
+
+  // Reassign ownership and delete the placeholder before writing discordId onto realUser --
+  // discordId is unique, so both rows can't hold the same value at once mid-transaction.
+  await prisma.$transaction([
+    prisma.ticket.updateMany({
+      where: { createdById: placeholder.id },
+      data: { createdById: realUserId },
+    }),
+    prisma.ticketMessage.updateMany({
+      where: { authorId: placeholder.id },
+      data: { authorId: realUserId },
+    }),
+    prisma.ticketAttachment.updateMany({
+      where: { uploadedById: placeholder.id },
+      data: { uploadedById: realUserId },
+    }),
+    prisma.user.delete({ where: { id: placeholder.id } }),
+    prisma.user.update({
+      where: { id: realUserId },
+      data: { discordId: placeholder.discordId },
+    }),
+  ]);
+
+  return { ticketId: claim.ticketId };
 }
 
 export async function addMessage(ticketId: string, authorId: string, input: CreateMessageInput) {
@@ -160,22 +333,24 @@ export async function addMessage(ticketId: string, authorId: string, input: Crea
 export async function updateTicket(ticketId: string, input: UpdateTicketInput, actorId: string) {
   const data: Prisma.TicketUpdateInput = {};
 
+  if (input.title !== undefined) data.title = input.title;
+  if (input.description !== undefined) data.description = input.description;
+
   if (input.status) {
     data.status = input.status;
     data.resolvedAt = RESOLVED_STATUSES.includes(input.status) ? new Date() : null;
   }
   if (input.priority) data.priority = input.priority;
+  if (input.type) data.type = input.type;
 
-  if (input.assignedToId !== undefined) {
-    if (input.assignedToId) {
-      const assignee = await prisma.user.findUnique({ where: { id: input.assignedToId } });
-      if (!assignee || assignee.role !== 'admin') {
+  if (input.assigneeIds !== undefined) {
+    if (input.assigneeIds.length > 0) {
+      const assignees = await prisma.user.findMany({ where: { id: { in: input.assigneeIds } } });
+      if (assignees.length !== input.assigneeIds.length || assignees.some((a) => a.role !== 'admin')) {
         throw new AppError('Tickets can only be assigned to admins');
       }
-      data.assignedTo = { connect: { id: input.assignedToId } };
-    } else {
-      data.assignedTo = { disconnect: true };
     }
+    data.assignees = { set: input.assigneeIds.map((id) => ({ id })) };
   }
 
   if (input.slaDueAt !== undefined) {
@@ -186,10 +361,14 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
     data.tags = { set: input.tagIds.map((id) => ({ id })) };
   }
 
+  if (input.watcherIds !== undefined) {
+    data.watchers = { set: input.watcherIds.map((id) => ({ id })) };
+  }
+
   const ticket = await prisma.ticket.update({
     where: { id: ticketId },
     data,
-    include: { tags: true, assignedTo: true, createdBy: true },
+    include: { tags: true, assignees: true, createdBy: true, watchers: true },
   });
 
   await prisma.auditLog.create({
@@ -209,6 +388,7 @@ export interface TicketMetrics {
   totalOpen: number;
   totalPending: number;
   totalEscalated: number;
+  totalInProgress: number;
   totalResolved: number;
   totalClosed: number;
   overdueCount: number;
@@ -250,6 +430,7 @@ export async function getTicketMetrics(): Promise<TicketMetrics> {
     totalOpen: statusCount('open'),
     totalPending: statusCount('pending'),
     totalEscalated: statusCount('escalated'),
+    totalInProgress: statusCount('in_progress'),
     totalResolved: statusCount('resolved'),
     totalClosed: statusCount('closed'),
     overdueCount,

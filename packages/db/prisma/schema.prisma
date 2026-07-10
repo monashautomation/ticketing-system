@@ -17,6 +17,7 @@ enum TicketStatus {
   open
   pending
   escalated
+  in_progress
   resolved
   closed
 }
@@ -26,6 +27,15 @@ enum TicketPriority {
   normal
   high
   urgent
+}
+
+enum TicketType {
+  bug
+  suggestion
+  improvement
+  feature
+  question
+  other
 }
 
 enum MaintenanceStatus {
@@ -50,15 +60,20 @@ model User {
   image         String?
   role          UserRole  @default(user)
   discordId     String?   @unique
+  /// True for a Discord-only placeholder account created before the user has
+  /// signed in via Authentik. Cleared (and the row deleted) once claimed --
+  /// see DiscordClaim.
+  isDiscordPlaceholder Boolean @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   sessions        Session[]
   accounts        Account[]
   ticketsCreated  Ticket[]        @relation("TicketCreatedBy")
-  ticketsAssigned Ticket[]        @relation("TicketAssignedTo")
+  ticketsAssigned Ticket[]        @relation("TicketAssignees")
+  ticketsWatching Ticket[]        @relation("TicketWatchers")
   messages        TicketMessage[]
-  linkCodes       DiscordLinkCode[]
+  discordClaim    DiscordClaim?
   auditLogs       AuditLog[]
   uploadedAttachments TicketAttachment[]
 
@@ -121,10 +136,9 @@ model Ticket {
   description       String
   status            TicketStatus @default(open)
   priority          TicketPriority @default(normal)
+  type              TicketType   @default(other)
   createdById       String
   createdBy         User         @relation("TicketCreatedBy", fields: [createdById], references: [id])
-  assignedToId      String?
-  assignedTo        User?        @relation("TicketAssignedTo", fields: [assignedToId], references: [id])
   discordChannelId  String?
   slaDueAt          DateTime?
   resolvedAt        DateTime?
@@ -135,10 +149,11 @@ model Ticket {
   accessTokens TicketAccessToken[]
   attachments  TicketAttachment[]
   tags         Tag[]               @relation("TicketTags")
+  watchers     User[]              @relation("TicketWatchers")
+  assignees    User[]              @relation("TicketAssignees")
 
   @@index([status])
   @@index([createdById])
-  @@index([assignedToId])
   @@index([slaDueAt])
   @@map("tickets")
 }
@@ -196,16 +211,19 @@ model TicketAccessToken {
   @@map("ticket_access_tokens")
 }
 
-model DiscordLinkCode {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  code      String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+/// Tracks a pending Discord-to-Authentik claim for a placeholder user created
+/// from a bot-side ticket. One row per placeholder; regenerated/refreshed
+/// each time that Discord user opens another ticket before claiming.
+model DiscordClaim {
+  id                String   @id @default(cuid())
+  tokenHash         String   @unique
+  placeholderUserId String   @unique
+  placeholderUser   User     @relation(fields: [placeholderUserId], references: [id], onDelete: Cascade)
+  ticketId          String
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
 
-  @@index([userId])
-  @@map("discord_link_codes")
+  @@map("discord_claims")
 }
 
 model MaintenanceEvent {

@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Lock, MessageCircle, Send } from 'lucide-react';
+import { buttonPrimary, input } from '@/lib/styles';
 
 interface Author {
   name: string;
@@ -66,25 +68,37 @@ export function TicketThread({ ticketId, token, initialMessages, canAddInternalN
   return (
     <div className="flex flex-col gap-4">
       <ul className="flex flex-col gap-3">
-        {messages.map((message) => (
+        {messages.length === 0 && (
+          <li className="flex flex-col items-center gap-2 py-6 text-center">
+            <MessageCircle className="h-6 w-6 text-text-tertiary" />
+            <p className="text-sm text-text-secondary">No replies yet.</p>
+          </li>
+        )}
+        {messages.map((message, index) => (
           <li
             key={message.id}
-            className={`rounded-lg border p-3 text-sm ${
-              message.isInternalNote ? 'border-amber-300 bg-amber-50' : 'border-neutral-200'
+            className={`animate-fade-in-up rounded-lg border p-3 text-sm transition-colors ${
+              message.isInternalNote ? 'border-warning/40 bg-warning-soft' : 'border-border bg-panel'
             }`}
+            style={{ animationDelay: `${Math.min(index, 6) * 25}ms` }}
           >
-            <p className="mb-1 text-xs font-medium text-neutral-500">
+            <p className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
               {message.author.name}
-              {message.isInternalNote ? ' · internal note' : ''}
+              {message.isInternalNote && (
+                <span className="inline-flex items-center gap-1">
+                  <Lock className="h-3 w-3" />
+                  internal note
+                </span>
+              )}
             </p>
-            <p>{message.body}</p>
+            <p className="text-text">{message.body}</p>
           </li>
         ))}
       </ul>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-2">
         <textarea
-          className="rounded-md border border-neutral-300 px-3 py-2 text-sm"
+          className={input}
           rows={3}
           placeholder="Write a reply…"
           value={body}
@@ -93,7 +107,7 @@ export function TicketThread({ ticketId, token, initialMessages, canAddInternalN
         />
         <div className="flex items-center justify-between">
           {canAddInternalNote ? (
-            <label className="flex items-center gap-2 text-sm text-neutral-500">
+            <label className="flex items-center gap-2 text-sm text-text-secondary">
               <input
                 type="checkbox"
                 checked={isInternalNote}
@@ -107,8 +121,9 @@ export function TicketThread({ ticketId, token, initialMessages, canAddInternalN
           <button
             type="submit"
             disabled={isSubmitting}
-            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className={`${buttonPrimary} gap-1.5 transition-all hover:-translate-y-0.5 active:translate-y-0`}
           >
+            <Send className="h-3.5 w-3.5" />
             Reply
           </button>
         </div>

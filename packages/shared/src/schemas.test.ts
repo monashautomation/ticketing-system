@@ -58,8 +58,8 @@ describe('updateTicketSchema', () => {
     expect(() => updateTicketSchema.parse({ status: 'not-a-real-status' })).toThrow();
   });
 
-  it('allows assignedToId to be explicitly null (unassign)', () => {
-    expect(updateTicketSchema.parse({ assignedToId: null }).assignedToId).toBeNull();
+  it('allows assigneeIds to be an empty array (unassign all)', () => {
+    expect(updateTicketSchema.parse({ assigneeIds: [] }).assigneeIds).toEqual([]);
   });
 });
 
