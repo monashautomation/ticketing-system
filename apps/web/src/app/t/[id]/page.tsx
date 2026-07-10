@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { prisma } from '@ticketing/db';
 import { getCurrentSession } from '@/lib/session';
 import { canViewTicket, getTicketOr404, verifyTicketToken } from '@/server/tickets';
 import { TicketThread } from '@/components/TicketThread';
@@ -44,7 +45,19 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
         {ticket.assignedTo ? ` · assigned to ${ticket.assignedTo.name}` : ' · unassigned'}
       </p>
 
-      {isAdmin && <AdminTicketControls ticketId={ticket.id} currentStatus={ticket.status} currentPriority={ticket.priority} />}
+      {isAdmin && (
+        <AdminTicketControls
+          ticketId={ticket.id}
+          currentStatus={ticket.status}
+          currentPriority={ticket.priority}
+          currentAssigneeId={ticket.assignedToId}
+          admins={await prisma.user.findMany({
+            where: { role: 'admin' },
+            select: { id: true, name: true },
+            orderBy: { name: 'asc' },
+          })}
+        />
+      )}
 
       <TicketThread
         ticketId={ticket.id}

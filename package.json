@@ -12,6 +12,7 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:integration": "bash scripts/test-integration.sh",
     "db:generate": "pnpm --filter @ticketing/db generate",
     "db:migrate": "pnpm --filter @ticketing/db migrate"
   },

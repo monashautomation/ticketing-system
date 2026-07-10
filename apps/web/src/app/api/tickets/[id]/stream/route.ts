@@ -1,4 +1,5 @@
-import { ForbiddenError, requireSession } from '@/lib/session';
+import { requireSession } from '@/lib/session';
+import { ForbiddenError } from '@/lib/errors';
 import { canViewTicket, getTicketOr404, verifyTicketToken } from '@/server/tickets';
 import { subscribeToTicket } from '@/server/ticket-events';
 import { handleApiError } from '@/lib/api-errors';

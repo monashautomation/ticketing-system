@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createMessageSchema } from '@ticketing/shared';
 import { handleApiError } from '@/lib/api-errors';
-import { requireSession, ForbiddenError } from '@/lib/session';
+import { requireSession } from '@/lib/session';
+import { ForbiddenError } from '@/lib/errors';
 import { addMessage, canViewTicket, getTicketOr404, verifyTicketToken } from '@/server/tickets';
 import { publishTicketMessage } from '@/server/ticket-events';
 

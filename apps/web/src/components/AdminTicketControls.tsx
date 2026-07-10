@@ -4,13 +4,28 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { TICKET_PRIORITIES, TICKET_STATUSES } from '@ticketing/shared';
 
+interface AdminOption {
+  id: string;
+  name: string;
+}
+
 interface AdminTicketControlsProps {
   ticketId: string;
   currentStatus: string;
   currentPriority: string;
+  currentAssigneeId: string | null;
+  admins: AdminOption[];
 }
 
-export function AdminTicketControls({ ticketId, currentStatus, currentPriority }: AdminTicketControlsProps) {
+const UNASSIGNED = '__unassigned__';
+
+export function AdminTicketControls({
+  ticketId,
+  currentStatus,
+  currentPriority,
+  currentAssigneeId,
+  admins,
+}: AdminTicketControlsProps) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
 
@@ -54,6 +69,25 @@ export function AdminTicketControls({ ticketId, currentStatus, currentPriority }
           {TICKET_PRIORITIES.map((priority) => (
             <option key={priority} value={priority}>
               {priority}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="flex items-center gap-2 text-sm">
+        Assignee
+        <select
+          className="rounded-md border border-neutral-300 px-2 py-1"
+          defaultValue={currentAssigneeId ?? UNASSIGNED}
+          disabled={isSaving}
+          onChange={(e) =>
+            update({ assignedToId: e.target.value === UNASSIGNED ? null : e.target.value })
+          }
+        >
+          <option value={UNASSIGNED}>Unassigned</option>
+          {admins.map((admin) => (
+            <option key={admin.id} value={admin.id}>
+              {admin.name}
             </option>
           ))}
         </select>

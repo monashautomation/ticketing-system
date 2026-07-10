@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { env } from './env';
-import { UnauthorizedError } from './session';
+import { UnauthorizedError } from './errors';
 
 /** Validates the shared-secret header the Discord bot sends on internal API calls. */
 export function requireInternalSecret(request: Request): void {
