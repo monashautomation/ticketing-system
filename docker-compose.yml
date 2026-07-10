@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ticketing
+      POSTGRES_PASSWORD: ticketing
+      POSTGRES_DB: ticketing
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ticketing']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: packages/db/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://ticketing:ticketing@postgres:5432/ticketing?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - '3000:3000'
+    environment:
+      DATABASE_URL: postgresql://ticketing:ticketing@postgres:5432/ticketing?schema=public
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-secret-change-me-32-bytes-min}
+      BETTER_AUTH_URL: http://localhost:3000
+      PUBLIC_APP_URL: http://localhost:3000
+      AUTHENTIK_ISSUER: ${AUTHENTIK_ISSUER}
+      AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID}
+      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET}
+      ADMIN_GROUPS: ${ADMIN_GROUPS:-ticketing-admins}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-internal-secret}
+      UPTIME_KUMA_WEBHOOK_SECRET: ${UPTIME_KUMA_WEBHOOK_SECRET:-dev-kuma-secret}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  bot:
+    build:
+      context: .
+      dockerfile: apps/bot/Dockerfile
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_DEV_GUILD_ID: ${DISCORD_DEV_GUILD_ID:-}
+      INTERNAL_API_URL: http://web:3000
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-internal-secret}
+    depends_on:
+      - web
+
+volumes:
+  postgres-data:

@@ -6,6 +6,7 @@ import type {
   CreateTicketInput,
   UpdateTicketInput,
 } from '@ticketing/shared';
+import { NotFoundError } from '@/lib/errors';
 
 const TICKET_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
@@ -30,7 +31,7 @@ export async function getTicketOr404(ticketId: string) {
       messages: { orderBy: { createdAt: 'asc' }, include: { author: true } },
     },
   });
-  if (!ticket) throw new Error('Ticket not found');
+  if (!ticket) throw new NotFoundError('Ticket not found');
   return ticket;
 }
 

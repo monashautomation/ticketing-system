@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 import { uptimeKumaWebhookSchema } from '@ticketing/shared';
 import { handleApiError } from '@/lib/api-errors';
-import { UnauthorizedError } from '@/lib/session';
+import { UnauthorizedError } from '@/lib/errors';
 import { env } from '@/lib/env';
 import { handleUptimeKumaWebhook } from '@/server/maintenance';
 

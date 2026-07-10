@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { prisma } from '@ticketing/db';
+import { AppError } from '@/lib/errors';
 
 const LINK_CODE_TTL_MS = 1000 * 60 * 10; // 10 minutes
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
@@ -22,12 +23,12 @@ export async function createLinkCode(userId: string) {
 export async function redeemLinkCode(code: string, discordId: string) {
   const record = await prisma.discordLinkCode.findUnique({ where: { code } });
   if (!record || record.expiresAt < new Date()) {
-    throw new Error('Invalid or expired code');
+    throw new AppError('Invalid or expired code');
   }
 
   const existingLink = await prisma.user.findUnique({ where: { discordId } });
   if (existingLink && existingLink.id !== record.userId) {
-    throw new Error('This Discord account is already linked to another user');
+    throw new AppError('This Discord account is already linked to another user');
   }
 
   const user = await prisma.user.update({
