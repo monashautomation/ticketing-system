@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ticketing
+resources:
+  - ../../base
+  - sealed-secrets.yaml
+images:
+  - name: ghcr.io/ORG/ticketing-web
+    newTag: latest
+  - name: ghcr.io/ORG/ticketing-bot
+    newTag: latest
+replicas:
+  - name: ticketing-web
+    count: 2

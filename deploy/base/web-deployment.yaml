@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ticketing-web
+  labels:
+    app: ticketing-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ticketing-web
+  template:
+    metadata:
+      labels:
+        app: ticketing-web
+    spec:
+      containers:
+        - name: web
+          image: ghcr.io/ORG/ticketing-web:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: ticketing-web-config
+            - secretRef:
+                name: ticketing-web-secrets
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ticketing-web
+spec:
+  selector:
+    app: ticketing-web
+  ports:
+    - port: 80
+      targetPort: 3000

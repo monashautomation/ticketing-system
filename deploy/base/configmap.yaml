@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ticketing-web-config
+data:
+  BETTER_AUTH_URL: "https://tickets.example.com"
+  PUBLIC_APP_URL: "https://tickets.example.com"
+  AUTHENTIK_ISSUER: "https://auth.example.com/application/o/ticketing/"
+  ADMIN_GROUPS: "ticketing-admins"
+  NODE_ENV: "production"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ticketing-bot-config
+data:
+  INTERNAL_API_URL: "http://ticketing-web"
+  NODE_ENV: "production"

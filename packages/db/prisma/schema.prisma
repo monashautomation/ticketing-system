@@ -1,0 +1,207 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  user
+  admin
+}
+
+enum TicketStatus {
+  open
+  pending
+  escalated
+  resolved
+  closed
+}
+
+enum TicketPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+enum MaintenanceStatus {
+  scheduled
+  in_progress
+  resolved
+}
+
+enum MaintenanceSource {
+  manual
+  uptime_kuma
+}
+
+/// BetterAuth-managed user table. id/email/emailVerified/name/image/createdAt/updatedAt
+/// are BetterAuth core fields; role/discordId are additionalFields configured in auth.ts.
+/// The Authentik `sub` lives on Account.accountId (providerId="authentik"), not here.
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  name          String
+  image         String?
+  role          UserRole  @default(user)
+  discordId     String?   @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions        Session[]
+  accounts        Account[]
+  ticketsCreated  Ticket[]        @relation("TicketCreatedBy")
+  ticketsAssigned Ticket[]        @relation("TicketAssignedTo")
+  messages        TicketMessage[]
+  linkCodes       DiscordLinkCode[]
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+/// BetterAuth core table.
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+/// BetterAuth core table. accountId = upstream provider's subject (Authentik `sub`).
+model Account {
+  id                    String    @id @default(cuid())
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerId            String
+  accountId             String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+/// BetterAuth core table (email verification / oauth state, etc).
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verifications")
+}
+
+model Ticket {
+  id                String       @id @default(cuid())
+  title             String
+  description       String
+  status            TicketStatus @default(open)
+  priority          TicketPriority @default(normal)
+  createdById       String
+  createdBy         User         @relation("TicketCreatedBy", fields: [createdById], references: [id])
+  assignedToId      String?
+  assignedTo        User?        @relation("TicketAssignedTo", fields: [assignedToId], references: [id])
+  discordChannelId  String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  messages     TicketMessage[]
+  accessTokens TicketAccessToken[]
+
+  @@index([status])
+  @@index([createdById])
+  @@index([assignedToId])
+  @@map("tickets")
+}
+
+model TicketMessage {
+  id             String   @id @default(cuid())
+  ticketId       String
+  ticket         Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User     @relation(fields: [authorId], references: [id])
+  body           String
+  isInternalNote Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([ticketId])
+  @@map("ticket_messages")
+}
+
+model TicketAccessToken {
+  id        String   @id @default(cuid())
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+  @@map("ticket_access_tokens")
+}
+
+model DiscordLinkCode {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("discord_link_codes")
+}
+
+model MaintenanceEvent {
+  id            String            @id @default(cuid())
+  title         String
+  body          String
+  status        MaintenanceStatus @default(scheduled)
+  startAt       DateTime
+  endAt         DateTime?
+  source        MaintenanceSource @default(manual)
+  kumaMonitorId String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([status])
+  @@index([kumaMonitorId])
+  @@map("maintenance_events")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String
+  targetType String
+  targetId   String
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@map("audit_log")
+}
