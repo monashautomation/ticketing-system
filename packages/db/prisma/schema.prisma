@@ -60,6 +60,7 @@ model User {
   messages        TicketMessage[]
   linkCodes       DiscordLinkCode[]
   auditLogs       AuditLog[]
+  uploadedAttachments TicketAttachment[]
 
   @@map("users")
 }
@@ -125,16 +126,48 @@ model Ticket {
   assignedToId      String?
   assignedTo        User?        @relation("TicketAssignedTo", fields: [assignedToId], references: [id])
   discordChannelId  String?
+  slaDueAt          DateTime?
+  resolvedAt        DateTime?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
   messages     TicketMessage[]
   accessTokens TicketAccessToken[]
+  attachments  TicketAttachment[]
+  tags         Tag[]               @relation("TicketTags")
 
   @@index([status])
   @@index([createdById])
   @@index([assignedToId])
+  @@index([slaDueAt])
   @@map("tickets")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String   @default("#6b7280")
+  createdAt DateTime @default(now())
+
+  tickets Ticket[] @relation("TicketTags")
+
+  @@map("tags")
+}
+
+model TicketAttachment {
+  id           String   @id @default(cuid())
+  ticketId     String
+  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  uploadedById String
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  storageKey   String   @unique
+  createdAt    DateTime @default(now())
+
+  @@index([ticketId])
+  @@map("ticket_attachments")
 }
 
 model TicketMessage {

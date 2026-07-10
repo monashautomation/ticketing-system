@@ -1,9 +1,11 @@
 import { notFound } from 'next/navigation';
 import { prisma } from '@ticketing/db';
 import { getCurrentSession } from '@/lib/session';
-import { canViewTicket, getTicketOr404, verifyTicketToken } from '@/server/tickets';
+import { canViewTicket, getTicketOr404, isOverdue, verifyTicketToken } from '@/server/tickets';
+import { listTags } from '@/server/tags';
 import { TicketThread } from '@/components/TicketThread';
 import { AdminTicketControls } from '@/components/AdminTicketControls';
+import { TicketAttachments } from '@/components/TicketAttachments';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -27,6 +29,7 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
 
   const isAdmin = user?.role === 'admin';
   const visibleMessages = isAdmin ? ticket.messages : ticket.messages.filter((m) => !m.isInternalNote);
+  const overdue = isOverdue(ticket);
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-10">
@@ -40,10 +43,31 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
         </span>
       </div>
 
-      <p className="mb-6 text-sm text-neutral-500">
+      <p className="mb-2 text-sm text-neutral-500">
         Opened by {ticket.createdBy.name}
         {ticket.assignedTo ? ` · assigned to ${ticket.assignedTo.name}` : ' · unassigned'}
       </p>
+
+      {ticket.tags.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {ticket.tags.map((tag) => (
+            <span
+              key={tag.id}
+              className="rounded-full px-2 py-0.5 text-xs font-medium text-white"
+              style={{ backgroundColor: tag.color }}
+            >
+              {tag.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {ticket.slaDueAt && (
+        <p className={`mb-6 text-sm ${overdue ? 'font-semibold text-red-700' : 'text-neutral-500'}`}>
+          SLA due {new Date(ticket.slaDueAt).toLocaleString()}
+          {overdue ? ' — overdue' : ''}
+        </p>
+      )}
 
       {isAdmin && (
         <AdminTicketControls
@@ -51,11 +75,23 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
           currentStatus={ticket.status}
           currentPriority={ticket.priority}
           currentAssigneeId={ticket.assignedToId}
+          currentSlaDueAt={ticket.slaDueAt ? ticket.slaDueAt.toISOString() : null}
+          currentTagIds={ticket.tags.map((t) => t.id)}
           admins={await prisma.user.findMany({
             where: { role: 'admin' },
             select: { id: true, name: true },
             orderBy: { name: 'asc' },
           })}
+          tags={await listTags()}
+        />
+      )}
+
+      {user && (
+        <TicketAttachments
+          ticketId={ticket.id}
+          attachments={ticket.attachments}
+          currentUserId={user.id}
+          isAdmin={isAdmin}
         />
       )}
 

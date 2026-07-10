@@ -5,6 +5,8 @@ import {
   addMessage,
   createTicket,
   createTicketFromDiscord,
+  getTicketMetrics,
+  listTicketsForAdminQueue,
   listTicketsForUser,
   updateTicket,
   verifyTicketToken,
@@ -155,5 +157,129 @@ describe('updateTicket', () => {
 
     const unassigned = await updateTicket(ticket.id, { assignedToId: null }, admin.id);
     expect(unassigned.assignedToId).toBeNull();
+  });
+
+  it('rejects assigning a ticket to a non-admin user', async () => {
+    const owner = await createTestUser();
+    const admin = await createTestUser({ name: 'Admin', email: 'admin4@test.local', role: 'admin' });
+    const regularUser = await createTestUser({ name: 'Regular', email: 'regular@test.local' });
+    const ticket = await createTicket(owner.id, {
+      title: 'Bad assign',
+      description: 'x',
+      priority: 'normal',
+    });
+
+    await expect(
+      updateTicket(ticket.id, { assignedToId: regularUser.id }, admin.id),
+    ).rejects.toThrow('Tickets can only be assigned to admins');
+  });
+
+  it('sets resolvedAt when status moves to resolved, and clears it on reopen', async () => {
+    const owner = await createTestUser();
+    const admin = await createTestUser({ name: 'Admin', email: 'admin5@test.local', role: 'admin' });
+    const ticket = await createTicket(owner.id, {
+      title: 'Resolve me',
+      description: 'x',
+      priority: 'normal',
+    });
+
+    const resolved = await updateTicket(ticket.id, { status: 'resolved' }, admin.id);
+    expect(resolved.resolvedAt).not.toBeNull();
+
+    const reopened = await updateTicket(ticket.id, { status: 'open' }, admin.id);
+    expect(reopened.resolvedAt).toBeNull();
+  });
+
+  it('sets and clears the SLA due date', async () => {
+    const owner = await createTestUser();
+    const admin = await createTestUser({ name: 'Admin', email: 'admin6@test.local', role: 'admin' });
+    const ticket = await createTicket(owner.id, {
+      title: 'SLA test',
+      description: 'x',
+      priority: 'normal',
+    });
+
+    const dueAt = new Date(Date.now() + 1000 * 60 * 60).toISOString();
+    const withSla = await updateTicket(ticket.id, { slaDueAt: dueAt }, admin.id);
+    expect(withSla.slaDueAt?.toISOString()).toBe(dueAt);
+
+    const cleared = await updateTicket(ticket.id, { slaDueAt: null }, admin.id);
+    expect(cleared.slaDueAt).toBeNull();
+  });
+
+  it('sets and replaces tags', async () => {
+    const owner = await createTestUser();
+    const admin = await createTestUser({ name: 'Admin', email: 'admin7@test.local', role: 'admin' });
+    const ticket = await createTicket(owner.id, {
+      title: 'Tag test',
+      description: 'x',
+      priority: 'normal',
+    });
+    const tagA = await prisma.tag.create({ data: { name: 'bug', color: '#ff0000' } });
+    const tagB = await prisma.tag.create({ data: { name: 'urgent', color: '#00ff00' } });
+
+    const withTagA = await updateTicket(ticket.id, { tagIds: [tagA.id] }, admin.id);
+    expect(withTagA.tags.map((t) => t.id)).toEqual([tagA.id]);
+
+    const withTagB = await updateTicket(ticket.id, { tagIds: [tagB.id] }, admin.id);
+    expect(withTagB.tags.map((t) => t.id)).toEqual([tagB.id]);
+  });
+});
+
+describe('listTicketsForAdminQueue', () => {
+  it('filters by status, priority, assignee, tag, and overdue-only', async () => {
+    const owner = await createTestUser();
+    const admin = await createTestUser({ name: 'Admin', email: 'queue-admin@test.local', role: 'admin' });
+    const tag = await prisma.tag.create({ data: { name: 'network', color: '#123456' } });
+
+    const overdueTicket = await createTicket(owner.id, {
+      title: 'Overdue ticket',
+      description: 'x',
+      priority: 'urgent',
+    });
+    await updateTicket(
+      overdueTicket.id,
+      { assignedToId: admin.id, tagIds: [tag.id], slaDueAt: new Date(Date.now() - 1000).toISOString() },
+      admin.id,
+    );
+
+    await createTicket(owner.id, { title: 'Fine ticket', description: 'x', priority: 'low' });
+
+    const overdueResults = await listTicketsForAdminQueue({ overdueOnly: true });
+    expect(overdueResults.map((t) => t.id)).toEqual([overdueTicket.id]);
+
+    const byPriority = await listTicketsForAdminQueue({ priority: 'urgent' });
+    expect(byPriority.map((t) => t.id)).toEqual([overdueTicket.id]);
+
+    const byTag = await listTicketsForAdminQueue({ tagId: tag.id });
+    expect(byTag.map((t) => t.id)).toEqual([overdueTicket.id]);
+
+    const byAssignee = await listTicketsForAdminQueue({ assignedToId: admin.id });
+    expect(byAssignee.map((t) => t.id)).toEqual([overdueTicket.id]);
+  });
+});
+
+describe('getTicketMetrics', () => {
+  it('computes status counts, overdue count, and average resolution time', async () => {
+    const owner = await createTestUser();
+    const admin = await createTestUser({ name: 'Admin', email: 'metrics-admin@test.local', role: 'admin' });
+
+    const openTicket = await createTicket(owner.id, { title: 'Open', description: 'x', priority: 'normal' });
+    await updateTicket(openTicket.id, { slaDueAt: new Date(Date.now() - 1000).toISOString() }, admin.id);
+
+    const resolvedTicket = await createTicket(owner.id, {
+      title: 'Resolved',
+      description: 'x',
+      priority: 'high',
+    });
+    await updateTicket(resolvedTicket.id, { status: 'resolved' }, admin.id);
+
+    const metrics = await getTicketMetrics();
+    expect(metrics.totalOpen).toBe(1);
+    expect(metrics.totalResolved).toBe(1);
+    expect(metrics.overdueCount).toBe(1);
+    expect(metrics.avgResolutionMs).not.toBeNull();
+    expect(metrics.byPriority.normal).toBe(1);
+    expect(metrics.byPriority.high).toBe(1);
   });
 });
