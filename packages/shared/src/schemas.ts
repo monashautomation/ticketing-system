@@ -25,8 +25,30 @@ export const updateTicketSchema = z.object({
   status: z.enum(TICKET_STATUSES).optional(),
   priority: z.enum(TICKET_PRIORITIES).optional(),
   assignedToId: z.string().nullable().optional(),
+  slaDueAt: z.string().datetime().nullable().optional(),
+  tagIds: z.array(z.string()).optional(),
 });
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
+
+export const createTagSchema = z.object({
+  name: z.string().min(1).max(40),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .default('#6b7280'),
+});
+export type CreateTagInput = z.infer<typeof createTagSchema>;
+
+export const requestUploadSchema = z.object({
+  fileName: z.string().min(1).max(255),
+  mimeType: z.string().min(1).max(127),
+  sizeBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(25 * 1024 * 1024), // 25MB cap
+});
+export type RequestUploadInput = z.infer<typeof requestUploadSchema>;
 
 export const linkDiscordSchema = z.object({
   code: z.string().length(8),

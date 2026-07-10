@@ -13,12 +13,29 @@ Deploys to Kubernetes via ArgoCD.
 - **SSO via Authentik** — sign in through BetterAuth's generic OIDC plugin.
   Authentik group membership auto-grants admin (`ADMIN_GROUPS` env), everyone
   else is a regular user.
-- **Ticket lifecycle** — create, reply (live via SSE), status/priority/assignee
+- **Ticket lifecycle** — create, reply (live via SSE), status/priority/SLA/tag
   changes, one-click escalate, admin-only internal notes.
+- **Admin queue** — `/admin` lists every ticket (submitter, title, status,
+  priority, assignee, tags, SLA due date) with filters for status, priority,
+  assignee, tag, and overdue-only. Overdue rows are highlighted.
+- **SLA due dates** — admins set a due date per ticket; tickets are "overdue"
+  once that date passes and the ticket isn't resolved/closed. Auto-clears when
+  resolved and is re-evaluated if reopened.
+- **Admin dashboard metrics** — `/admin/metrics` shows open/pending/escalated/
+  resolved/closed counts, overdue count, average resolution time, and a
+  priority breakdown.
+- **Ticket categories/tags** — admins manage a shared tag set at `/admin/tags`
+  (name + color) and apply multiple tags per ticket from the ticket detail view.
+- **File attachments** — upload files to a ticket (any S3/minio-compatible
+  bucket). Uploads go straight from the browser to storage via a presigned
+  URL; the server never proxies file bytes.
+- **Assignment is admin-only** — tickets can only be assigned to users with
+  the `admin` role; the API rejects assigning to a regular user.
 - **Uptime Kuma integration** — Kuma's webhook notification posts to this app,
   which opens/resolves a maintenance event and shows it on a public `/status`
   page. Admins can also post manual maintenance windows.
-- **RBAC** — users see their own tickets; admins see and manage everything.
+- **RBAC** — users see and reply to their own tickets, including who's
+  assigned; admins see and manage everything via the admin queue.
 
 ## Architecture
 
@@ -43,6 +60,8 @@ keeps one write path into the database.
 - Docker + Docker Compose (for local Postgres / full-stack run)
 - An Authentik instance with an OIDC application configured for this app
 - A Discord application + bot token ([Discord Developer Portal](https://discord.com/developers/applications))
+- An S3-compatible bucket for ticket attachments (AWS S3, or self-hosted
+  [minio](https://min.io) — the local Docker Compose stack runs minio for you)
 
 ## Configuring Authentik
 
@@ -87,6 +106,11 @@ and fill in real values. Per-app `.env.example` files exist too, for running
 | `UPTIME_KUMA_WEBHOOK_SECRET` | web | Sent as `?secret=` query param on the Kuma webhook URL |
 | `DISCORD_TOKEN` / `DISCORD_CLIENT_ID` | bot | From the Discord application |
 | `DISCORD_DEV_GUILD_ID` | bot | Optional, guild-scoped commands for dev |
+| `S3_ENDPOINT` | web | Must be reachable from the **browser** — presigned upload/download URLs are handed to the client directly, not proxied |
+| `S3_REGION` | web | Defaults to `us-east-1`; minio ignores the value but the SDK requires one |
+| `S3_BUCKET` | web | Bucket for ticket attachments (created automatically by the `minio-init` compose service in dev) |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | web | Credentials for the bucket |
+| `S3_FORCE_PATH_STYLE` | web | `true` for minio/most self-hosted S3-compatible stores; `false` for AWS S3 |
 
 ## Running in development
 
@@ -97,9 +121,12 @@ Two ways to run locally. Both need `docker compose up -d postgres` at minimum
 
 ```bash
 cp .env.example .env   # fill in real values
-docker compose up -d postgres migrate web bot
+docker compose up -d postgres migrate minio minio-init web bot
 curl http://localhost:3000/api/health   # should return {"success":true,...}
 ```
+
+`minio-init` creates the attachments bucket automatically. The minio console
+is at `http://localhost:9001` (login with `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`).
 
 Rebuild after code changes: `docker compose up -d --build web bot`.
 
@@ -107,7 +134,7 @@ Rebuild after code changes: `docker compose up -d --build web bot`.
 
 ```bash
 pnpm install
-docker compose up -d postgres          # just the database
+docker compose up -d postgres minio minio-init   # database + attachment storage
 pnpm --filter @ticketing/db generate
 DATABASE_URL=postgresql://ticketing:ticketing@localhost:5432/ticketing?schema=public \
   pnpm --filter @ticketing/db exec prisma migrate deploy
@@ -183,3 +210,8 @@ maintenance event; the next matching up → resolves it.
 - SSE (live ticket replies) uses an in-memory event bus — fine for one `web`
   replica, needs Redis pub/sub if you scale past that.
 - No email notifications; Discord DM + web UI only.
+- Attachments are capped at 25MB per file (enforced in `requestUploadSchema`);
+  raise the limit there and in your S3/minio bucket policy if needed.
+- No malware/content scanning on uploaded attachments — if that matters for
+  your deployment, add a scanning step (e.g. ClamAV sidecar) before trusting
+  downloads.

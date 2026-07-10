@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getCurrentSession } from '@/lib/session';
 import { listTicketsForUser } from '@/server/tickets';
 import { SignInButton } from '@/components/SignInButton';
+import { LogoutButton } from '@/components/LogoutButton';
 import { NewTicketForm } from '@/components/NewTicketForm';
 
 export default async function DashboardPage() {
@@ -19,16 +20,37 @@ export default async function DashboardPage() {
 
   const role = session.user.role as 'user' | 'admin';
   const tickets = await listTicketsForUser(session.user.id, role);
+  const providerInfo = 'providerInfo' in session ? session.providerInfo : null;
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
       <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">
-          {role === 'admin' ? 'All Tickets' : 'Your Tickets'}
-        </h1>
-        <Link href="/settings/link-discord" className="text-sm text-neutral-500 hover:underline">
-          Link Discord
-        </Link>
+        <h1 className="text-2xl font-semibold">{role === 'admin' ? 'All Tickets' : 'Your Tickets'}</h1>
+        <nav className="flex gap-4 text-sm text-neutral-500">
+          {role === 'admin' && (
+            <>
+              <Link href="/admin" className="hover:underline">
+                Admin Queue
+              </Link>
+              <Link href="/admin/metrics" className="hover:underline">
+                Metrics
+              </Link>
+            </>
+          )}
+          <Link href="/settings/link-discord" className="hover:underline">
+            Link Discord
+          </Link>
+        </nav>
+        <LogoutButton />
+      </div>
+
+      <div className="mb-6 rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
+        <div className="font-medium text-neutral-900">
+          Account type: <span className="uppercase tracking-wide">{role}</span>
+        </div>
+        <div className="mt-1">
+          Groups: <span className="font-mono">{providerInfo?.groups.length ? providerInfo.groups.join(', ') : 'none'}</span>
+        </div>
       </div>
 
       <NewTicketForm />

@@ -4,8 +4,10 @@ import { prisma } from '@ticketing/db';
 export async function resetDatabase(): Promise<void> {
   await prisma.auditLog.deleteMany();
   await prisma.ticketAccessToken.deleteMany();
+  await prisma.ticketAttachment.deleteMany();
   await prisma.ticketMessage.deleteMany();
   await prisma.ticket.deleteMany();
+  await prisma.tag.deleteMany();
   await prisma.discordLinkCode.deleteMany();
   await prisma.maintenanceEvent.deleteMany();
   await prisma.session.deleteMany();
