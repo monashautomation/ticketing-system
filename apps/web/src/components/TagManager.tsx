@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { buttonPrimary, errorText, inputSm, mutedText } from '@/lib/styles';
 
 interface Tag {
   id: string;
@@ -51,22 +52,18 @@ export function TagManager({ tags }: { tags: Tag[] }) {
           onChange={(e) => setName(e.target.value)}
           placeholder="Tag name"
           required
-          className="rounded-md border border-neutral-300 px-2 py-1 text-sm"
+          className={inputSm}
         />
         <input
           type="color"
           value={color}
           onChange={(e) => setColor(e.target.value)}
-          className="h-8 w-10 rounded-md border border-neutral-300"
+          className="h-8 w-10 rounded-md border border-border bg-elevated"
         />
-        <button
-          type="submit"
-          disabled={isSaving}
-          className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white"
-        >
+        <button type="submit" disabled={isSaving} className={buttonPrimary}>
           Add tag
         </button>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className={errorText}>{error}</p>}
       </form>
 
       <ul className="flex flex-wrap gap-2">
@@ -81,13 +78,13 @@ export function TagManager({ tags }: { tags: Tag[] }) {
               onClick={() => removeTag(tag.id)}
               disabled={isSaving}
               aria-label={`Delete ${tag.name}`}
-              className="text-white/80 hover:text-white"
+              className="text-white/80 transition-colors hover:text-white"
             >
               ×
             </button>
           </li>
         ))}
-        {tags.length === 0 && <p className="text-sm text-neutral-500">No tags yet.</p>}
+        {tags.length === 0 && <p className={mutedText}>No tags yet.</p>}
       </ul>
     </div>
   );

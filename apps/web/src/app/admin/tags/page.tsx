@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentSession } from '@/lib/session';
+import { AppHeader } from '@/components/AppHeader';
 import { listTags } from '@/server/tags';
 import { TagManager } from '@/components/TagManager';
+import { backLink, page, pageHeader, pageTitle } from '@/lib/styles';
 
 export default async function AdminTagsPage() {
   const session = await getCurrentSession();
@@ -11,14 +13,17 @@ export default async function AdminTagsPage() {
   const tags = await listTags();
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-10">
-      <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Ticket Tags</h1>
-        <Link href="/admin" className="text-sm text-neutral-500 hover:underline">
-          Back to queue
-        </Link>
-      </div>
-      <TagManager tags={tags} />
-    </main>
+    <>
+      <AppHeader />
+      <main className={page}>
+        <div className={pageHeader}>
+          <h1 className={pageTitle}>Ticket Tags</h1>
+          <Link href="/admin" className={backLink}>
+            Back to queue
+          </Link>
+        </div>
+        <TagManager tags={tags} />
+      </main>
+    </>
   );
 }

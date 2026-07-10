@@ -8,7 +8,7 @@ export async function resetDatabase(): Promise<void> {
   await prisma.ticketMessage.deleteMany();
   await prisma.ticket.deleteMany();
   await prisma.tag.deleteMany();
-  await prisma.discordLinkCode.deleteMany();
+  await prisma.discordClaim.deleteMany();
   await prisma.maintenanceEvent.deleteMany();
   await prisma.session.deleteMany();
   await prisma.account.deleteMany();

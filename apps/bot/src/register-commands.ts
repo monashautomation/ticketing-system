@@ -1,9 +1,8 @@
 import { REST, Routes } from 'discord.js';
 import { env } from './env';
 import * as ticketCommand from './commands/ticket';
-import * as linkCommand from './commands/link';
 
-const commands = [ticketCommand.data.toJSON(), linkCommand.data.toJSON()];
+const commands = [ticketCommand.data.toJSON()];
 const rest = new REST().setToken(env.discordToken);
 
 async function main() {

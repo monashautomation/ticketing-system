@@ -11,6 +11,7 @@ export const env = {
   authentikIssuer: required('AUTHENTIK_ISSUER'),
   authentikClientId: required('AUTHENTIK_CLIENT_ID'),
   authentikClientSecret: required('AUTHENTIK_CLIENT_SECRET'),
+  authentikApiToken: required('AUTHENTIK_API_TOKEN'),
   adminGroups: (process.env.ADMIN_GROUPS ?? '')
     .split(',')
     .map((g) => g.trim())

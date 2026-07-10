@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   try {
     const session = await requireSession();
     const body = createTicketSchema.parse(await request.json());
-    const ticket = await createTicket(session.user.id, body);
+    const ticket = await createTicket(session.user.id, session.user.role as 'user' | 'admin', body);
     return NextResponse.json({ success: true, data: ticket }, { status: 201 });
   } catch (error) {
     return handleApiError(error);

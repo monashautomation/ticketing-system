@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { canViewTicket, isOverdue } from './tickets';
 
-const ticket = { createdById: 'user-1', assignedToId: 'user-2' };
+const ticket = { createdById: 'user-1', assignees: [{ id: 'user-2' }] };
 
 describe('canViewTicket', () => {
   it('denies access when there is no user', () => {
@@ -25,7 +25,7 @@ describe('canViewTicket', () => {
   });
 
   it('denies an unrelated user even when the ticket has no assignee', () => {
-    expect(canViewTicket({ createdById: 'user-1', assignedToId: null }, { id: 'user-4', role: 'user' })).toBe(
+    expect(canViewTicket({ createdById: 'user-1', assignees: [] }, { id: 'user-4', role: 'user' })).toBe(
       false,
     );
   });
