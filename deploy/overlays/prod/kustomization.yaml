@@ -5,11 +5,11 @@ resources:
   - ../../base
   - sealed-secrets.yaml
 images:
-  - name: ghcr.io/ORG/ticketing-web
+  - name: ghcr.io/monashautomation/ticketing-web
     newTag: latest
-  - name: ghcr.io/ORG/ticketing-bot
+  - name: ghcr.io/monashautomation/ticketing-bot
     newTag: latest
-  - name: ghcr.io/ORG/ticketing-migrate
+  - name: ghcr.io/monashautomation/ticketing-migrate
     newTag: latest
 replicas:
   - name: ticketing-web

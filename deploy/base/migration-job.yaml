@@ -12,7 +12,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: migrate
-          image: ghcr.io/ORG/ticketing-migrate:latest
+          image: ghcr.io/monashautomation/ticketing-migrate:latest
           envFrom:
             - secretRef:
                 name: ticketing-web-secrets
