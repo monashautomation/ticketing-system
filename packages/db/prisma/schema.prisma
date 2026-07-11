@@ -49,6 +49,17 @@ enum MaintenanceSource {
   uptime_kuma
 }
 
+enum NotificationType {
+  reply
+  status_changed
+}
+
+enum DiscordDmKind {
+  pending_notice
+  pending_escalation
+  reply_reminder
+}
+
 /// BetterAuth-managed user table. id/email/emailVerified/name/image/createdAt/updatedAt
 /// are BetterAuth core fields; role/discordId are additionalFields configured in auth.ts.
 /// The Authentik `sub` lives on Account.accountId (providerId="authentik"), not here.
@@ -76,6 +87,7 @@ model User {
   discordClaim    DiscordClaim?
   auditLogs       AuditLog[]
   uploadedAttachments TicketAttachment[]
+  notifications   Notification[]
 
   @@map("users")
 }
@@ -142,20 +154,65 @@ model Ticket {
   discordChannelId  String?
   slaDueAt          DateTime?
   resolvedAt        DateTime?
+  /// Set when status transitions into `pending`; cleared when it leaves. Drives the
+  /// 3-day escalation reminder DM and dedupes the initial "awaiting your response" DM.
+  pendingSince           DateTime?
+  pendingEscalationSentAt DateTime?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
-  messages     TicketMessage[]
-  accessTokens TicketAccessToken[]
-  attachments  TicketAttachment[]
-  tags         Tag[]               @relation("TicketTags")
-  watchers     User[]              @relation("TicketWatchers")
-  assignees    User[]              @relation("TicketAssignees")
+  messages      TicketMessage[]
+  accessTokens  TicketAccessToken[]
+  attachments   TicketAttachment[]
+  tags          Tag[]               @relation("TicketTags")
+  watchers      User[]              @relation("TicketWatchers")
+  assignees     User[]              @relation("TicketAssignees")
+  notifications Notification[]
+  discordDms    DiscordDm[]
 
   @@index([status])
   @@index([createdById])
   @@index([slaDueAt])
   @@map("tickets")
+}
+
+/// In-app notification tray entry. One row per (user, event) -- e.g. every watcher on a
+/// ticket gets their own row when a reply lands, so read state is per-user.
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketId  String
+  ticket    Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  message   String
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  /// Set once the 30-minutes-unread reply reminder DM has been queued, so the
+  /// background sweep never queues a second one for the same notification.
+  discordReminderSentAt DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@index([ticketId])
+  @@map("notifications")
+}
+
+/// Outbound Discord DM queue. The web app enqueues rows; the bot polls
+/// /api/internal/discord-dms/pending and sends them, since only the bot process
+/// holds the live Discord gateway connection.
+model DiscordDm {
+  id           String        @id @default(cuid())
+  discordUserId String
+  ticketId     String
+  ticket       Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  kind         DiscordDmKind
+  message      String
+  sentAt       DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@index([sentAt])
+  @@map("discord_dms")
 }
 
 model Tag {

@@ -9,6 +9,8 @@ images:
     newTag: latest
   - name: ghcr.io/ORG/ticketing-bot
     newTag: latest
+  - name: ghcr.io/ORG/ticketing-migrate
+    newTag: latest
 replicas:
   - name: ticketing-web
     count: 2
