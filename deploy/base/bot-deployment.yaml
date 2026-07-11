@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: bot
-          image: ghcr.io/ORG/ticketing-bot:latest
+          image: ghcr.io/monashautomation/ticketing-bot:latest
           envFrom:
             - configMapRef:
                 name: ticketing-bot-config
