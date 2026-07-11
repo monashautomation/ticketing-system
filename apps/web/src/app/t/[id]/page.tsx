@@ -1,9 +1,24 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { prisma } from '@ticketing/db';
 import { getCurrentSession } from '@/lib/session';
-import { canViewTicket, getTicketOr404, verifyTicketToken } from '@/server/tickets';
+import { canViewTicket, getTicketOr404, isOverdue, verifyTicketToken } from '@/server/tickets';
+import { markTicketNotificationsRead } from '@/server/notifications';
+import { listTags } from '@/server/tags';
+import { AppHeader } from '@/components/AppHeader';
 import { TicketThread } from '@/components/TicketThread';
 import { AdminTicketControls } from '@/components/AdminTicketControls';
+import { TicketAttachments } from '@/components/TicketAttachments';
+import { TicketTitleEditor } from '@/components/TicketTitleEditor';
+import { CcEditor } from '@/components/CcEditor';
+import {
+  backLink,
+  badgeDanger,
+  badgeNeutral,
+  mutedText,
+  page,
+  priorityBadgeClass,
+  statusBadgeClass,
+} from '@/lib/styles';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -25,37 +40,102 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
   const hasTokenAccess = token ? await verifyTicketToken(id, token) : false;
   if (!hasTokenAccess && !canViewTicket(ticket, user)) notFound();
 
+  if (user) await markTicketNotificationsRead(id, user.id);
+
   const isAdmin = user?.role === 'admin';
+  const isOwner = user?.id === ticket.createdById;
   const visibleMessages = isAdmin ? ticket.messages : ticket.messages.filter((m) => !m.isInternalNote);
+  const overdue = isOverdue(ticket);
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-10">
+    <>
+      <AppHeader />
+      <main className={page}>
+      <Link href="/" className={`${backLink} mb-6`}>
+        ← Back to tickets
+      </Link>
+
       <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">{ticket.title}</h1>
-          <p className="mt-1 text-sm text-neutral-500">{ticket.description}</p>
-        </div>
-        <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium uppercase tracking-wide">
-          {ticket.status}
-        </span>
+        {isAdmin ? (
+          <TicketTitleEditor
+            ticketId={ticket.id}
+            initialTitle={ticket.title}
+            initialDescription={ticket.description}
+          />
+        ) : (
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight text-text">{ticket.title}</h1>
+            <p className={`mt-1 ${mutedText}`}>{ticket.description}</p>
+          </div>
+        )}
+        <span className={statusBadgeClass(ticket.status)}>{ticket.status}</span>
       </div>
 
-      <p className="mb-6 text-sm text-neutral-500">
+      <p className={`mb-3 ${mutedText}`}>
         Opened by {ticket.createdBy.name}
-        {ticket.assignedTo ? ` · assigned to ${ticket.assignedTo.name}` : ' · unassigned'}
+        {ticket.assignees.length > 0
+          ? ` · assigned to ${ticket.assignees.map((a) => a.name).join(', ')}`
+          : ' · unassigned'}
       </p>
+
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <span className={priorityBadgeClass(ticket.priority)}>{ticket.priority}</span>
+        <span className={`${badgeNeutral} capitalize`}>{ticket.type}</span>
+        {ticket.tags.map((tag) => (
+          <span
+            key={tag.id}
+            className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium text-white"
+            style={{ backgroundColor: tag.color }}
+          >
+            {tag.name}
+          </span>
+        ))}
+      </div>
+
+      {!isAdmin && isOwner && (
+        <div className="mb-3">
+          <CcEditor
+            ticketId={ticket.id}
+            initialWatchers={ticket.watchers.map((w) => ({ id: w.id, name: w.name }))}
+          />
+        </div>
+      )}
+      {!isAdmin && !isOwner && ticket.watchers.length > 0 && (
+        <p className={`mb-3 ${mutedText}`}>CC: {ticket.watchers.map((w) => w.name).join(', ')}</p>
+      )}
+
+      {ticket.slaDueAt && (
+        <p className="mb-6 text-sm">
+          {overdue ? (
+            <span className={badgeDanger}>overdue</span>
+          ) : (
+            <span className="text-text-secondary">
+              SLA due {new Date(ticket.slaDueAt).toLocaleString()}
+            </span>
+          )}
+        </p>
+      )}
 
       {isAdmin && (
         <AdminTicketControls
           ticketId={ticket.id}
           currentStatus={ticket.status}
           currentPriority={ticket.priority}
-          currentAssigneeId={ticket.assignedToId}
-          admins={await prisma.user.findMany({
-            where: { role: 'admin' },
-            select: { id: true, name: true },
-            orderBy: { name: 'asc' },
-          })}
+          currentType={ticket.type}
+          currentAssignees={ticket.assignees.map((a) => ({ id: a.id, name: a.name }))}
+          currentSlaDueAt={ticket.slaDueAt ? ticket.slaDueAt.toISOString() : null}
+          currentTagIds={ticket.tags.map((t) => t.id)}
+          currentWatchers={ticket.watchers.map((w) => ({ id: w.id, name: w.name }))}
+          tags={await listTags()}
+        />
+      )}
+
+      {user && (
+        <TicketAttachments
+          ticketId={ticket.id}
+          attachments={ticket.attachments}
+          currentUserId={user.id}
+          isAdmin={isAdmin}
         />
       )}
 
@@ -65,6 +145,7 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
         initialMessages={visibleMessages}
         canAddInternalNote={isAdmin}
       />
-    </main>
+      </main>
+    </>
   );
 }

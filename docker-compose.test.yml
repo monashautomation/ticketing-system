@@ -14,3 +14,30 @@ services:
       interval: 2s
       timeout: 5s
       retries: 20
+
+  minio-test:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ticketing-test
+      MINIO_ROOT_PASSWORD: ticketing-test-secret
+    ports:
+      - '59000:9000'
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  minio-test-init:
+    image: minio/mc:latest
+    depends_on:
+      minio-test:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio-test:9000 ticketing-test ticketing-test-secret &&
+      mc mb -p local/ticketing-test
+      "

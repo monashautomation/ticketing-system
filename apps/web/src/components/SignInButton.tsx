@@ -1,11 +1,12 @@
 'use client';
 
 import { authClient } from '@/lib/auth-client';
+import { buttonPrimary } from '@/lib/styles';
 
 export function SignInButton() {
   return (
     <button
-      className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700"
+      className={buttonPrimary}
       onClick={() =>
         authClient.signIn.oauth2({
           providerId: 'authentik',

@@ -3,5 +3,6 @@ kind: Kustomization
 resources:
   - web-deployment.yaml
   - bot-deployment.yaml
+  - migration-job.yaml
   - ingress.yaml
   - configmap.yaml

@@ -1,57 +1,97 @@
-import Link from 'next/link';
-import { getCurrentSession } from '@/lib/session';
-import { listTicketsForUser } from '@/server/tickets';
-import { SignInButton } from '@/components/SignInButton';
-import { NewTicketForm } from '@/components/NewTicketForm';
+import Link from "next/link";
+import { ChevronRight, Inbox } from "lucide-react";
+import { getCurrentSession } from "@/lib/session";
+import { listTicketsForUser } from "@/server/tickets";
+import { AppHeader } from "@/components/AppHeader";
+import { NewTicketForm } from "@/components/NewTicketForm";
+import {
+    mutedText,
+    page,
+    pageHeader,
+    pageNarrow,
+    pageTitle,
+    statusBadgeClass,
+} from "@/lib/styles";
 
 export default async function DashboardPage() {
-  const session = await getCurrentSession();
+    const session = await getCurrentSession();
 
-  if (!session) {
+    if (!session) {
+        return (
+            <>
+                <AppHeader />
+                <main className={`${pageNarrow} flex flex-col items-center gap-4 text-center`}>
+                    <h1 className="text-2xl font-semibold tracking-tight text-text">
+                        Support Tickets
+                    </h1>
+                    <p className={mutedText}>Sign in to view or open a ticket.</p>
+                </main>
+            </>
+        );
+    }
+
+    const tickets = await listTicketsForUser(session.user.id);
+
     return (
-      <main className="mx-auto flex max-w-md flex-col items-center gap-4 pt-32 text-center">
-        <h1 className="text-2xl font-semibold">Support Tickets</h1>
-        <p className="text-neutral-500">Sign in to view or open a ticket.</p>
-        <SignInButton />
-      </main>
+        <>
+            <AppHeader />
+            <main className={page}>
+                <div className={pageHeader}>
+                    <h1 className={pageTitle}>Your Tickets</h1>
+                </div>
+
+                <NewTicketForm />
+
+                <ul className="mt-8 divide-y divide-border">
+                    {tickets.map((ticket, index) => (
+                        <li
+                            key={ticket.id}
+                            className="animate-fade-in-up py-4"
+                            style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
+                        >
+                            <Link
+                                href={`/t/${ticket.id}`}
+                                className="group flex items-center justify-between gap-4 rounded-md px-2 -mx-2 transition-all hover:translate-x-0.5 hover:bg-panel"
+                            >
+                                <div>
+                                    <p className="font-medium text-text">{ticket.title}</p>
+                                    <p className={mutedText}>
+                                        {ticket.createdBy.name}
+                                        {ticket.assignees.length > 0
+                                            ? ` · assigned to ${ticket.assignees.map((a) => a.name).join(", ")}`
+                                            : ""}
+                                    </p>
+                                    {ticket.tags.length > 0 && (
+                                        <div className="mt-1.5 flex flex-wrap gap-1">
+                                            {ticket.tags.map((tag) => (
+                                                <span
+                                                    key={tag.id}
+                                                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                                                    style={{ backgroundColor: tag.color }}
+                                                >
+                                                    {tag.name}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className={statusBadgeClass(ticket.status)}>
+                                        {ticket.status}
+                                    </span>
+                                    <ChevronRight className="h-4 w-4 text-text-tertiary opacity-0 transition-opacity group-hover:opacity-100" />
+                                </div>
+                            </Link>
+                        </li>
+                    ))}
+                    {tickets.length === 0 && (
+                        <div className="flex flex-col items-center gap-2 py-12 text-center">
+                            <Inbox className="h-8 w-8 text-text-tertiary" />
+                            <p className={mutedText}>No tickets yet.</p>
+                        </div>
+                    )}
+                </ul>
+            </main>
+        </>
     );
-  }
-
-  const role = session.user.role as 'user' | 'admin';
-  const tickets = await listTicketsForUser(session.user.id, role);
-
-  return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
-      <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">
-          {role === 'admin' ? 'All Tickets' : 'Your Tickets'}
-        </h1>
-        <Link href="/settings/link-discord" className="text-sm text-neutral-500 hover:underline">
-          Link Discord
-        </Link>
-      </div>
-
-      <NewTicketForm />
-
-      <ul className="mt-8 divide-y divide-neutral-200">
-        {tickets.map((ticket) => (
-          <li key={ticket.id} className="py-4">
-            <Link href={`/t/${ticket.id}`} className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">{ticket.title}</p>
-                <p className="text-sm text-neutral-500">
-                  {ticket.createdBy.name}
-                  {ticket.assignedTo ? ` · assigned to ${ticket.assignedTo.name}` : ''}
-                </p>
-              </div>
-              <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium uppercase tracking-wide">
-                {ticket.status}
-              </span>
-            </Link>
-          </li>
-        ))}
-        {tickets.length === 0 && <p className="py-4 text-neutral-500">No tickets yet.</p>}
-      </ul>
-    </main>
-  );
 }

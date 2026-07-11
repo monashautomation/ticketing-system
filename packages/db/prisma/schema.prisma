@@ -17,6 +17,7 @@ enum TicketStatus {
   open
   pending
   escalated
+  in_progress
   resolved
   closed
 }
@@ -26,6 +27,15 @@ enum TicketPriority {
   normal
   high
   urgent
+}
+
+enum TicketType {
+  bug
+  suggestion
+  improvement
+  feature
+  question
+  other
 }
 
 enum MaintenanceStatus {
@@ -39,6 +49,17 @@ enum MaintenanceSource {
   uptime_kuma
 }
 
+enum NotificationType {
+  reply
+  status_changed
+}
+
+enum DiscordDmKind {
+  pending_notice
+  pending_escalation
+  reply_reminder
+}
+
 /// BetterAuth-managed user table. id/email/emailVerified/name/image/createdAt/updatedAt
 /// are BetterAuth core fields; role/discordId are additionalFields configured in auth.ts.
 /// The Authentik `sub` lives on Account.accountId (providerId="authentik"), not here.
@@ -50,16 +71,23 @@ model User {
   image         String?
   role          UserRole  @default(user)
   discordId     String?   @unique
+  /// True for a Discord-only placeholder account created before the user has
+  /// signed in via Authentik. Cleared (and the row deleted) once claimed --
+  /// see DiscordClaim.
+  isDiscordPlaceholder Boolean @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   sessions        Session[]
   accounts        Account[]
   ticketsCreated  Ticket[]        @relation("TicketCreatedBy")
-  ticketsAssigned Ticket[]        @relation("TicketAssignedTo")
+  ticketsAssigned Ticket[]        @relation("TicketAssignees")
+  ticketsWatching Ticket[]        @relation("TicketWatchers")
   messages        TicketMessage[]
-  linkCodes       DiscordLinkCode[]
+  discordClaim    DiscordClaim?
   auditLogs       AuditLog[]
+  uploadedAttachments TicketAttachment[]
+  notifications   Notification[]
 
   @@map("users")
 }
@@ -120,21 +148,98 @@ model Ticket {
   description       String
   status            TicketStatus @default(open)
   priority          TicketPriority @default(normal)
+  type              TicketType   @default(other)
   createdById       String
   createdBy         User         @relation("TicketCreatedBy", fields: [createdById], references: [id])
-  assignedToId      String?
-  assignedTo        User?        @relation("TicketAssignedTo", fields: [assignedToId], references: [id])
   discordChannelId  String?
+  slaDueAt          DateTime?
+  resolvedAt        DateTime?
+  /// Set when status transitions into `pending`; cleared when it leaves. Drives the
+  /// 3-day escalation reminder DM and dedupes the initial "awaiting your response" DM.
+  pendingSince           DateTime?
+  pendingEscalationSentAt DateTime?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
-  messages     TicketMessage[]
-  accessTokens TicketAccessToken[]
+  messages      TicketMessage[]
+  accessTokens  TicketAccessToken[]
+  attachments   TicketAttachment[]
+  tags          Tag[]               @relation("TicketTags")
+  watchers      User[]              @relation("TicketWatchers")
+  assignees     User[]              @relation("TicketAssignees")
+  notifications Notification[]
+  discordDms    DiscordDm[]
 
   @@index([status])
   @@index([createdById])
-  @@index([assignedToId])
+  @@index([slaDueAt])
   @@map("tickets")
+}
+
+/// In-app notification tray entry. One row per (user, event) -- e.g. every watcher on a
+/// ticket gets their own row when a reply lands, so read state is per-user.
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketId  String
+  ticket    Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  message   String
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  /// Set once the 30-minutes-unread reply reminder DM has been queued, so the
+  /// background sweep never queues a second one for the same notification.
+  discordReminderSentAt DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@index([ticketId])
+  @@map("notifications")
+}
+
+/// Outbound Discord DM queue. The web app enqueues rows; the bot polls
+/// /api/internal/discord-dms/pending and sends them, since only the bot process
+/// holds the live Discord gateway connection.
+model DiscordDm {
+  id           String        @id @default(cuid())
+  discordUserId String
+  ticketId     String
+  ticket       Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  kind         DiscordDmKind
+  message      String
+  sentAt       DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@index([sentAt])
+  @@map("discord_dms")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String   @default("#6b7280")
+  createdAt DateTime @default(now())
+
+  tickets Ticket[] @relation("TicketTags")
+
+  @@map("tags")
+}
+
+model TicketAttachment {
+  id           String   @id @default(cuid())
+  ticketId     String
+  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  uploadedById String
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  storageKey   String   @unique
+  createdAt    DateTime @default(now())
+
+  @@index([ticketId])
+  @@map("ticket_attachments")
 }
 
 model TicketMessage {
@@ -163,16 +268,19 @@ model TicketAccessToken {
   @@map("ticket_access_tokens")
 }
 
-model DiscordLinkCode {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  code      String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+/// Tracks a pending Discord-to-Authentik claim for a placeholder user created
+/// from a bot-side ticket. One row per placeholder; regenerated/refreshed
+/// each time that Discord user opens another ticket before claiming.
+model DiscordClaim {
+  id                String   @id @default(cuid())
+  tokenHash         String   @unique
+  placeholderUserId String   @unique
+  placeholderUser   User     @relation(fields: [placeholderUserId], references: [id], onDelete: Cascade)
+  ticketId          String
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
 
-  @@index([userId])
-  @@map("discord_link_codes")
+  @@map("discord_claims")
 }
 
 model MaintenanceEvent {

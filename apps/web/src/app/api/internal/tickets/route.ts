@@ -9,15 +9,11 @@ export async function POST(request: Request) {
   try {
     requireInternalSecret(request);
     const body = createInternalTicketSchema.parse(await request.json());
-    const { ticket, accessToken, isNewUser } = await createTicketFromDiscord(body);
+    const { ticket, path, isNewUser } = await createTicketFromDiscord(body);
 
     return NextResponse.json({
       success: true,
-      data: {
-        ticketId: ticket.id,
-        isNewUser,
-        url: `${env.publicAppUrl}/t/${ticket.id}?token=${accessToken}`,
-      },
+      data: { ticketId: ticket.id, isNewUser, url: `${env.publicAppUrl}${path}` },
     });
   } catch (error) {
     return handleApiError(error);

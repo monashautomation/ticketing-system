@@ -26,6 +26,17 @@ export const auth = betterAuth({
       discordId: { type: 'string', required: false, input: false },
     },
   },
+  account: {
+    accountLinking: {
+      // authentikSync proactively creates User rows (emailVerified: true) for the whole
+      // directory before anyone logs in, so a user's first real login always hits the
+      // "link to existing user" path, not "create new user". Without marking authentik as
+      // trusted here, better-auth also requires the OIDC userinfo response to carry an
+      // email_verified claim before it'll link automatically -- Authentik doesn't send one
+      // for this app, so every first login was rejected with "account_not_linked".
+      trustedProviders: ['authentik'],
+    },
+  },
   plugins: [
     genericOAuth({
       config: [

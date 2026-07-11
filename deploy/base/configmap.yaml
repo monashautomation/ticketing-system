@@ -7,6 +7,10 @@ data:
   PUBLIC_APP_URL: "https://tickets.example.com"
   AUTHENTIK_ISSUER: "https://auth.example.com/application/o/ticketing/"
   ADMIN_GROUPS: "ticketing-admins"
+  S3_ENDPOINT: "https://s3.example.com"
+  S3_REGION: "us-east-1"
+  S3_BUCKET: "ticketing-attachments"
+  S3_FORCE_PATH_STYLE: "false"
   NODE_ENV: "production"
 ---
 apiVersion: v1
