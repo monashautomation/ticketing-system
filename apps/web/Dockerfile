@@ -26,6 +26,7 @@ ENV DATABASE_URL="postgresql://build:build@localhost:5432/build" \
     AUTHENTIK_ISSUER="https://auth.invalid/application/o/placeholder/" \
     AUTHENTIK_CLIENT_ID="build-placeholder" \
     AUTHENTIK_CLIENT_SECRET="build-placeholder" \
+    AUTHENTIK_API_TOKEN="build-placeholder" \
     ADMIN_GROUPS="ticketing-admins" \
     INTERNAL_API_SECRET="build-placeholder" \
     UPTIME_KUMA_WEBHOOK_SECRET="build-placeholder"
