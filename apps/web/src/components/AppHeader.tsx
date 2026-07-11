@@ -4,6 +4,7 @@ import { BarChart3, Inbox, Tag as TagIcon, Ticket } from 'lucide-react';
 import { getCurrentSession } from '@/lib/session';
 import { SignInButton } from '@/components/SignInButton';
 import { LogoutButton } from '@/components/LogoutButton';
+import { NotificationBell } from '@/components/NotificationBell';
 import {
   avatarCircle,
   avatarName,
@@ -44,7 +45,7 @@ export async function AppHeader() {
           <nav className={headerNav}>
             <Link href="/" className={`${navLink} inline-flex items-center gap-1.5`}>
               <Ticket className="h-4 w-4" />
-              {role === 'admin' ? 'All Tickets' : 'My Tickets'}
+              My Tickets
             </Link>
             {role === 'admin' && (
               <>
@@ -68,6 +69,7 @@ export async function AppHeader() {
         <div className={headerAccount}>
           {session ? (
             <>
+              <NotificationBell />
               <span className={`${avatarCircle} transition-transform hover:scale-105`}>
                 {initials(session.user.name)}
               </span>

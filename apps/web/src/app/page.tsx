@@ -30,17 +30,14 @@ export default async function DashboardPage() {
         );
     }
 
-    const role = session.user.role as "user" | "admin";
-    const tickets = await listTicketsForUser(session.user.id, role);
+    const tickets = await listTicketsForUser(session.user.id);
 
     return (
         <>
             <AppHeader />
             <main className={page}>
                 <div className={pageHeader}>
-                    <h1 className={pageTitle}>
-                        {role === "admin" ? "All Tickets" : "Your Tickets"}
-                    </h1>
+                    <h1 className={pageTitle}>Your Tickets</h1>
                 </div>
 
                 <NewTicketForm />

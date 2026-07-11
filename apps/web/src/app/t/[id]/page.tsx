@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getCurrentSession } from '@/lib/session';
 import { canViewTicket, getTicketOr404, isOverdue, verifyTicketToken } from '@/server/tickets';
+import { markTicketNotificationsRead } from '@/server/notifications';
 import { listTags } from '@/server/tags';
 import { AppHeader } from '@/components/AppHeader';
 import { TicketThread } from '@/components/TicketThread';
@@ -38,6 +39,8 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
 
   const hasTokenAccess = token ? await verifyTicketToken(id, token) : false;
   if (!hasTokenAccess && !canViewTicket(ticket, user)) notFound();
+
+  if (user) await markTicketNotificationsRead(id, user.id);
 
   const isAdmin = user?.role === 'admin';
   const isOwner = user?.id === ticket.createdById;

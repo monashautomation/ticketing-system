@@ -61,12 +61,22 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/ticketing-bot:${{ steps.meta.outputs.sha }}
             ghcr.io/${{ github.repository_owner }}/ticketing-bot:latest
 
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/db/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ticketing-migrate:${{ steps.meta.outputs.sha }}
+            ghcr.io/${{ github.repository_owner }}/ticketing-migrate:latest
+
       - name: Bump image tags for ArgoCD (GitOps commit)
         run: |
           cd deploy/overlays/prod
           npx --yes kustomize edit set image \
             ghcr.io/${{ github.repository_owner }}/ticketing-web:${{ steps.meta.outputs.sha }} \
-            ghcr.io/${{ github.repository_owner }}/ticketing-bot:${{ steps.meta.outputs.sha }}
+            ghcr.io/${{ github.repository_owner }}/ticketing-bot:${{ steps.meta.outputs.sha }} \
+            ghcr.io/${{ github.repository_owner }}/ticketing-migrate:${{ steps.meta.outputs.sha }}
           cd -
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

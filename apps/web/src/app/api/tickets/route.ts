@@ -7,7 +7,7 @@ import { createTicket, listTicketsForUser } from '@/server/tickets';
 export async function GET() {
   try {
     const session = await requireSession();
-    const tickets = await listTicketsForUser(session.user.id, session.user.role as 'user' | 'admin');
+    const tickets = await listTicketsForUser(session.user.id);
     return NextResponse.json({ success: true, data: tickets });
   } catch (error) {
     return handleApiError(error);

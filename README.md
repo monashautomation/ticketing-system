@@ -167,9 +167,18 @@ pnpm lint
 Production runs as containers on Kubernetes, deployed via ArgoCD (GitOps) —
 not `docker compose up` on a server.
 
-- `deploy/base` — Deployments/Services/Ingress/ConfigMaps (kustomize base)
+- `deploy/base` — Deployments/Services/Ingress/ConfigMaps + the migration
+  `Job` (kustomize base)
 - `deploy/overlays/prod` — prod-specific patches + image tags
-- `argocd/application.yaml` — ArgoCD `Application` pointing at `deploy/overlays/prod`
+- `argocd/application.yaml` — ArgoCD `Application` pointing at
+  `deploy/overlays/prod`
+
+Three images are built: `ticketing-web`, `ticketing-bot`, and
+`ticketing-migrate` (built from `packages/db/Dockerfile`, runs
+`prisma migrate deploy` and exits). The migrate image runs as a k8s `Job`
+annotated `argocd.argoproj.io/hook: PreSync` — ArgoCD runs it to completion
+against `DATABASE_URL` before every sync that changes the web/bot
+Deployments, so the schema is always migrated ahead of the new pods starting.
 
 **One-time setup before the first sync:**
 
@@ -178,7 +187,11 @@ not `docker compose up` on a server.
 2. Generate real secrets from `deploy/base/secrets.example.yaml` with
    [`kubeseal`](https://github.com/bitnami-labs/sealed-secrets) and commit the
    result to `deploy/overlays/prod/sealed-secrets.yaml` (placeholder only —
-   never commit plaintext secrets).
+   never commit plaintext secrets). This includes `DATABASE_URL` (used by both
+   the web Deployment and the migration Job) and the `S3_ACCESS_KEY_ID`/
+   `S3_SECRET_ACCESS_KEY` pair — the non-secret S3 vars (`S3_ENDPOINT`,
+   `S3_REGION`, `S3_BUCKET`, `S3_FORCE_PATH_STYLE`) live in
+   `deploy/base/configmap.yaml` and need real values for your bucket too.
 3. `kubectl apply -f argocd/application.yaml`
 4. Register Discord slash commands globally: run `pnpm --filter bot register`
    once with prod's `DISCORD_TOKEN`/`DISCORD_CLIENT_ID` and
@@ -186,13 +199,17 @@ not `docker compose up` on a server.
    propagate).
 
 **Ongoing deploys are automatic:** CI (`.github/workflows/ci.yml`) builds and
-pushes both images on every merge to `main`, bumps the overlay's image tags
-(a GitOps commit), and ArgoCD picks up the change and syncs the cluster — no
-manual `kubectl apply` needed after the initial setup above.
+pushes all three images on every merge to `main`, bumps the overlay's image
+tags (a GitOps commit), and ArgoCD picks up the change, runs the migration
+Job, then syncs the web/bot Deployments — no manual `kubectl apply` needed
+after the initial setup above.
 
 **Rolling back:** revert or fix-forward the GitOps commit that bumped the
 image tag in `deploy/overlays/prod/kustomization.yaml`; ArgoCD will sync to
-whatever that file points at.
+whatever that file points at. Note the migration Job only ever runs forward
+(`prisma migrate deploy`) — reverting the tag does **not** undo a schema
+migration. If a bad release included one, fix-forward with a new migration
+rather than reverting past it.
 
 ## Uptime Kuma setup
 

@@ -9,6 +9,7 @@ import type {
   UpdateTicketInput,
 } from '@ticketing/shared';
 import { AppError, NotFoundError } from '@/lib/errors';
+import { handlePendingTransition, notifyReply, notifyStatusChanged } from '@/server/notifications';
 
 const TICKET_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const DISCORD_CLAIM_TTL_MS = 1000 * 60 * 30; // 30 minutes
@@ -56,12 +57,13 @@ function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-export async function listTicketsForUser(userId: string, role: 'user' | 'admin') {
+/**
+ * Always scoped to tickets the user submitted or is cc'd on -- admins included. Admins reach
+ * every ticket through listTicketsForAdminQueue (the separate admin queue page), never here.
+ */
+export async function listTicketsForUser(userId: string) {
   return prisma.ticket.findMany({
-    where:
-      role === 'admin'
-        ? {}
-        : { OR: [{ createdById: userId }, { watchers: { some: { id: userId } } }] },
+    where: { OR: [{ createdById: userId }, { watchers: { some: { id: userId } } }] },
     orderBy: { updatedAt: 'desc' },
     include: { createdBy: true, assignees: true, tags: true, watchers: true },
   });
@@ -326,11 +328,27 @@ export async function addMessage(ticketId: string, authorId: string, input: Crea
     },
     include: { author: true },
   });
-  await prisma.ticket.update({ where: { id: ticketId }, data: { updatedAt: new Date() } });
+  const ticket = await prisma.ticket.update({
+    where: { id: ticketId },
+    data: { updatedAt: new Date() },
+    include: { watchers: true, assignees: true },
+  });
+
+  // Internal notes are admin-only, so the ticket owner/watchers must never be notified of them.
+  if (!input.isInternalNote) {
+    await notifyReply(ticket, authorId);
+  }
+
   return message;
 }
 
 export async function updateTicket(ticketId: string, input: UpdateTicketInput, actorId: string) {
+  const previous = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    select: { status: true },
+  });
+  if (!previous) throw new NotFoundError('Ticket not found');
+
   const data: Prisma.TicketUpdateInput = {};
 
   if (input.title !== undefined) data.title = input.title;
@@ -380,6 +398,14 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
       meta: input as Prisma.InputJsonValue,
     },
   });
+
+  if (input.status && input.status !== previous.status) {
+    await notifyStatusChanged(ticket, input.status, actorId);
+    // Deferred import: keeps env.ts's required-var validation out of the module load path for
+    // pure-function unit tests (canViewTicket, isOverdue) that never call updateTicket.
+    const { env } = await import('@/lib/env');
+    await handlePendingTransition(ticket, previous.status, env.publicAppUrl);
+  }
 
   return ticket;
 }

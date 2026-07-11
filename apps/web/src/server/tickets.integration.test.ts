@@ -18,20 +18,24 @@ beforeEach(async () => {
 });
 
 describe('createTicket + listTicketsForUser', () => {
-  it('only returns a user their own tickets, but returns everything for admins', async () => {
+  it('only returns a user their own tickets, including when the user is an admin', async () => {
     const owner = await createTestUser({ name: 'Owner' });
     const otherUser = await createTestUser({ name: 'Other', email: 'other@test.local' });
     const admin = await createTestUser({ name: 'Admin', email: 'admin@test.local', role: 'admin' });
 
     await createTicket(owner.id, 'user', { title: 'Printer jam', description: 'x', priority: 'normal', type: 'other' });
     await createTicket(otherUser.id, 'user', { title: 'VPN down', description: 'y', priority: 'high', type: 'other' });
+    await createTicket(admin.id, 'admin', { title: "Admin's own ticket", description: 'z', priority: 'normal', type: 'other' });
 
-    const ownerView = await listTicketsForUser(owner.id, 'user');
+    const ownerView = await listTicketsForUser(owner.id);
     expect(ownerView).toHaveLength(1);
     expect(ownerView[0]?.title).toBe('Printer jam');
 
-    const adminView = await listTicketsForUser(admin.id, 'admin');
-    expect(adminView).toHaveLength(2);
+    // Admins only see tickets they submitted or are cc'd on here -- the admin queue page
+    // (listTicketsForAdminQueue) is the only place that shows every ticket.
+    const adminView = await listTicketsForUser(admin.id);
+    expect(adminView).toHaveLength(1);
+    expect(adminView[0]?.title).toBe("Admin's own ticket");
   });
 
   it('surfaces a ticket to its cc\'d watcher, and rejects ccing yourself', async () => {
@@ -47,7 +51,7 @@ describe('createTicket + listTicketsForUser', () => {
     });
     expect(ticket.watchers.map((w) => w.id)).toEqual([watcher.id]);
 
-    const watcherView = await listTicketsForUser(watcher.id, 'user');
+    const watcherView = await listTicketsForUser(watcher.id);
     expect(watcherView.map((t) => t.id)).toEqual([ticket.id]);
 
     await expect(
