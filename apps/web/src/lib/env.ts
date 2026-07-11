@@ -20,6 +20,7 @@ export const env = {
   uptimeKumaWebhookSecret: required('UPTIME_KUMA_WEBHOOK_SECRET'),
   publicAppUrl: required('PUBLIC_APP_URL'),
   s3Endpoint: required('S3_ENDPOINT'),
+  s3InternalEndpoint: process.env.S3_INTERNAL_ENDPOINT ?? required('S3_ENDPOINT'),
   s3Region: process.env.S3_REGION ?? 'us-east-1',
   s3Bucket: required('S3_BUCKET'),
   s3AccessKeyId: required('S3_ACCESS_KEY_ID'),

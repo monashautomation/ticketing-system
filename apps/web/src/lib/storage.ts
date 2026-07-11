@@ -5,8 +5,21 @@ import { env } from './env';
 
 const PRESIGNED_URL_TTL_SECONDS = 5 * 60;
 
+// Used to presign URLs handed to the browser, which must be able to reach the endpoint directly.
 const s3 = new S3Client({
   endpoint: env.s3Endpoint,
+  region: env.s3Region,
+  forcePathStyle: env.s3ForcePathStyle,
+  credentials: {
+    accessKeyId: env.s3AccessKeyId,
+    secretAccessKey: env.s3SecretAccessKey,
+  },
+});
+
+// Used for server-to-storage calls (e.g. delete), which may need a different
+// network path than the browser-reachable endpoint above (e.g. a Docker service name).
+const s3Internal = new S3Client({
+  endpoint: env.s3InternalEndpoint,
   region: env.s3Region,
   forcePathStyle: env.s3ForcePathStyle,
   credentials: {
@@ -39,5 +52,5 @@ export async function getDownloadUrl(storageKey: string, fileName: string): Prom
 }
 
 export async function deleteObject(storageKey: string): Promise<void> {
-  await s3.send(new DeleteObjectCommand({ Bucket: env.s3Bucket, Key: storageKey }));
+  await s3Internal.send(new DeleteObjectCommand({ Bucket: env.s3Bucket, Key: storageKey }));
 }
