@@ -57,20 +57,17 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction) {
       title,
       description,
       priority: 'normal',
+      type: 'other',
       discordUserId: interaction.user.id,
       discordUsername: interaction.user.username,
       discordChannelId: interaction.channelId ?? undefined,
     });
 
-    await interaction.editReply(
-      `Ticket created. Check your DMs for the link — or open it directly: ${result.url}`,
-    );
+    await interaction.editReply(`Hey, here's your ticket: ${result.url}`);
 
-    await interaction.user
-      .send(`Your support ticket "${title}" was created: ${result.url}`)
-      .catch(() => {
-        // DMs closed — the ephemeral reply above already has the link, nothing further to do.
-      });
+    await interaction.user.send(`Hey, here's your ticket: ${result.url}`).catch(() => {
+      // DMs closed — the ephemeral reply above already has the link, nothing further to do.
+    });
   } catch (error) {
     await interaction.editReply(
       `Couldn't create your ticket: ${error instanceof Error ? error.message : 'unknown error'}`,

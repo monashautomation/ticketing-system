@@ -3,12 +3,71 @@
 @tailwind utilities;
 
 :root {
-  --color-surface: oklch(98% 0 0);
-  --color-text: oklch(18% 0 0);
-  --color-accent: oklch(58% 0.19 255);
+  --bg: #0a0a0c;
+  --panel: #131316;
+  --elevated: #19191d;
+  --border: #232327;
+  --border-strong: #303035;
+  --text: #eeeef0;
+  --text-secondary: #93939c;
+  --text-tertiary: #67676f;
+  --accent: #6e6ef6;
+  --accent-hover: #8080f8;
+  --accent-soft: rgb(110 110 246 / 0.14);
+  --danger: #f0555c;
+  --danger-soft: rgb(240 85 92 / 0.12);
+  --success: #4dc38a;
+  --success-soft: rgb(77 195 138 / 0.12);
+  --warning: #dfa53f;
+  --warning-soft: rgb(223 165 63 / 0.12);
+}
+
+html {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--color-surface);
-  color: var(--color-text);
+  background: var(--bg);
+  color: var(--text);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid var(--bg);
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up {
+    animation: none;
+  }
 }

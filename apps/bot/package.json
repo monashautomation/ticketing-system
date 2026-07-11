@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx --env-file=.env watch src/index.ts",
     "build": "tsc --noEmit",
-    "start": "tsx src/index.ts",
-    "register": "tsx src/register-commands.ts",
+    "start": "tsx --env-file=.env src/index.ts",
+    "register": "tsx --env-file=.env src/register-commands.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

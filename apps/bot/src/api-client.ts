@@ -31,9 +31,6 @@ export function createTicket(input: CreateInternalTicketInput) {
   );
 }
 
-export function redeemLinkCode(code: string, discordUserId: string) {
-  return internalFetch<{ userId: string; name: string }>('/api/internal/link-codes/redeem', {
-    code,
-    discordUserId,
-  });
+export function syncAuthentikDirectory() {
+  return internalFetch<{ upserted: number }>('/api/internal/sync-authentik', {});
 }

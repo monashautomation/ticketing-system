@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ghcr.io/ORG/ticketing-web:latest
+          image: ghcr.io/monashautomation/ticketing-web:latest
           ports:
             - containerPort: 3000
           envFrom:
