@@ -101,6 +101,7 @@ and fill in real values. Per-app `.env.example` files exist too, for running
 | `BETTER_AUTH_URL` / `PUBLIC_APP_URL` | web | Public URL of the web app |
 | `AUTHENTIK_ISSUER` | web | Authentik OIDC issuer URL |
 | `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` | web | From the Authentik application |
+| `AUTHENTIK_API_TOKEN` | web | Authentik API token with read access to `core/users/`, used to sync the user directory |
 | `ADMIN_GROUPS` | web | Comma-separated Authentik group names → admin role |
 | `INTERNAL_API_SECRET` | web, bot | Shared secret between bot and web's internal API |
 | `UPTIME_KUMA_WEBHOOK_SECRET` | web | Sent as `?secret=` query param on the Kuma webhook URL |
