@@ -82,8 +82,10 @@ export function AdminTicketControls({
   const [assigneeQuery, setAssigneeQuery] = useState('');
   const [assigneeResults, setAssigneeResults] = useState<AdminOption[]>([]);
   const [pendingCloseStatus, setPendingCloseStatus] = useState<'resolved' | 'closed' | null>(null);
+  const [pendingReopenStatus, setPendingReopenStatus] = useState<TicketStatus | null>(null);
   const [resolutionMessage, setResolutionMessage] = useState('');
   const [closeReason, setCloseReason] = useState<CloseReason>('not_planned');
+  const isClosed = currentStatus === 'closed';
 
   useEffect(() => {
     const query = assigneeQuery.trim();
@@ -141,11 +143,25 @@ export function AdminTicketControls({
       setPendingCloseStatus(status);
       return;
     }
+    if (isClosed) {
+      setPendingReopenStatus(status);
+      return;
+    }
     update({ status });
   }
 
   function cancelClose() {
     setPendingCloseStatus(null);
+  }
+
+  function cancelReopen() {
+    setPendingReopenStatus(null);
+  }
+
+  function confirmReopen() {
+    if (!pendingReopenStatus) return;
+    update({ status: pendingReopenStatus });
+    setPendingReopenStatus(null);
   }
 
   function confirmClose() {
@@ -180,7 +196,7 @@ export function AdminTicketControls({
             value={currentPriority as TicketPriority}
             options={TICKET_PRIORITIES}
             config={PRIORITY_CONFIG}
-            disabled={isSaving}
+            disabled={isSaving || isClosed}
             onChange={(priority) => update({ priority })}
           />
         </label>
@@ -191,7 +207,7 @@ export function AdminTicketControls({
             value={currentType as TicketType}
             options={TICKET_TYPES}
             config={TYPE_CONFIG}
-            disabled={isSaving}
+            disabled={isSaving || isClosed}
             onChange={(type) => update({ type })}
           />
         </label>
@@ -202,24 +218,26 @@ export function AdminTicketControls({
             type="datetime-local"
             className={inputSm}
             defaultValue={toDatetimeLocal(currentSlaDueAt)}
-            disabled={isSaving}
+            disabled={isSaving || isClosed}
             onChange={(e) =>
               update({ slaDueAt: e.target.value ? new Date(e.target.value).toISOString() : null })
             }
           />
         </label>
 
-        <button
-          className={`${badgeWarning} ml-auto inline-flex cursor-pointer items-center gap-1.5 border-none px-3 py-1.5 transition-all hover:-translate-y-0.5 hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0`}
-          disabled={isSaving}
-          onClick={() => update({ status: 'escalated', priority: 'urgent' })}
-        >
-          <TriangleAlert className="h-3.5 w-3.5" />
-          Escalate
-        </button>
+        {!isClosed && (
+          <button
+            className={`${badgeWarning} ml-auto inline-flex cursor-pointer items-center gap-1.5 border-none px-3 py-1.5 transition-all hover:-translate-y-0.5 hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0`}
+            disabled={isSaving}
+            onClick={() => update({ status: 'escalated', priority: 'urgent' })}
+          >
+            <TriangleAlert className="h-3.5 w-3.5" />
+            Escalate
+          </button>
+        )}
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div className={`flex flex-col gap-2 ${isClosed ? 'pointer-events-none opacity-50' : ''}`}>
         <span className={mutedText}>Assignees (admins only):</span>
         <div className="flex flex-wrap items-center gap-2">
           {selectedAssignees.map((admin) => (
@@ -266,7 +284,7 @@ export function AdminTicketControls({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={`flex flex-wrap items-center gap-2 ${isClosed ? 'pointer-events-none opacity-50' : ''}`}>
         <span className={mutedText}>Tags:</span>
         {tags.map((tag) => {
           const selected = selectedTagIds.includes(tag.id);
@@ -290,7 +308,9 @@ export function AdminTicketControls({
         {tags.length === 0 && <span className="text-sm text-text-tertiary">No tags configured.</span>}
       </div>
 
-      <CcEditor ticketId={ticketId} initialWatchers={currentWatchers} />
+      <div className={isClosed ? 'pointer-events-none opacity-50' : ''}>
+        <CcEditor ticketId={ticketId} initialWatchers={currentWatchers} />
+      </div>
 
       {pendingCloseStatus && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -352,6 +372,31 @@ export function AdminTicketControls({
                 disabled={isSaving || confirmDisabled}
               >
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingReopenStatus && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className={`${card} w-full max-w-sm animate-fade-in-up`}>
+            <h2 className="mb-1 text-sm font-semibold text-text">Reopen this ticket?</h2>
+            <p className={`mb-4 ${mutedText}`}>
+              This ticket is closed. Reopening will set its status to{' '}
+              {STATUS_CONFIG[pendingReopenStatus].label} and it will show up as active again.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button type="button" className={buttonGhost} onClick={cancelReopen} disabled={isSaving}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={buttonPrimary}
+                onClick={confirmReopen}
+                disabled={isSaving}
+              >
+                Reopen
               </button>
             </div>
           </div>
