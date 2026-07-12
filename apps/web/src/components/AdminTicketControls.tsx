@@ -3,9 +3,20 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { TriangleAlert } from 'lucide-react';
-import { TICKET_PRIORITIES, TICKET_STATUSES, TICKET_TYPES } from '@ticketing/shared';
-import { badgeWarning, card, input, inputSm, labelInline, mutedText, select } from '@/lib/styles';
+import {
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  TICKET_TYPES,
+  type TicketPriority,
+  type TicketStatus,
+  type TicketType,
+} from '@ticketing/shared';
+import { badgeWarning, card, input, inputSm, labelInline, mutedText } from '@/lib/styles';
 import { CcEditor } from '@/components/CcEditor';
+import { OptionDropdown } from '@/components/OptionDropdown';
+import { STATUS_CONFIG } from '@/lib/ticketStatus';
+import { PRIORITY_CONFIG } from '@/lib/ticketPriority';
+import { TYPE_CONFIG } from '@/lib/ticketType';
 
 interface AdminOption {
   id: string;
@@ -111,50 +122,35 @@ export function AdminTicketControls({
       <div className="flex flex-wrap items-center gap-3">
         <label className={labelInline}>
           Status
-          <select
-            className={select}
-            defaultValue={currentStatus}
+          <OptionDropdown
+            value={currentStatus as TicketStatus}
+            options={TICKET_STATUSES}
+            config={STATUS_CONFIG}
             disabled={isSaving}
-            onChange={(e) => update({ status: e.target.value })}
-          >
-            {TICKET_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
+            onChange={(status) => update({ status })}
+          />
         </label>
 
         <label className={labelInline}>
           Priority
-          <select
-            className={select}
-            defaultValue={currentPriority}
+          <OptionDropdown
+            value={currentPriority as TicketPriority}
+            options={TICKET_PRIORITIES}
+            config={PRIORITY_CONFIG}
             disabled={isSaving}
-            onChange={(e) => update({ priority: e.target.value })}
-          >
-            {TICKET_PRIORITIES.map((priority) => (
-              <option key={priority} value={priority}>
-                {priority}
-              </option>
-            ))}
-          </select>
+            onChange={(priority) => update({ priority })}
+          />
         </label>
 
         <label className={labelInline}>
           Type
-          <select
-            className={select}
-            defaultValue={currentType}
+          <OptionDropdown
+            value={currentType as TicketType}
+            options={TICKET_TYPES}
+            config={TYPE_CONFIG}
             disabled={isSaving}
-            onChange={(e) => update({ type: e.target.value })}
-          >
-            {TICKET_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
+            onChange={(type) => update({ type })}
+          />
         </label>
 
         <label className={labelInline}>

@@ -65,26 +65,3 @@ export const tableHeadCell = 'px-4 py-2.5 font-medium';
 export const tableCell = 'px-4 py-3';
 export const tableRowDivider = 'divide-y divide-border';
 
-const STATUS_BADGE: Record<string, string> = {
-  open: badgeAccent,
-  pending: badgeWarning,
-  escalated: badgeDanger,
-  in_progress: badgeAccent,
-  resolved: badgeSuccess,
-  closed: badgeNeutral,
-};
-
-const PRIORITY_BADGE: Record<string, string> = {
-  low: badgeNeutral,
-  normal: badgeAccent,
-  high: badgeWarning,
-  urgent: badgeDanger,
-};
-
-export function statusBadgeClass(status: string): string {
-  return STATUS_BADGE[status] ?? badgeNeutral;
-}
-
-export function priorityBadgeClass(priority: string): string {
-  return PRIORITY_BADGE[priority] ?? badgeNeutral;
-}
