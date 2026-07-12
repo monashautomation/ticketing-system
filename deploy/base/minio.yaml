@@ -115,6 +115,9 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+          env:
+            - name: HOME
+              value: /tmp
           envFrom:
             - configMapRef:
                 name: ticketing-minio-config
