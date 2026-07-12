@@ -7,6 +7,9 @@ import { TICKET_PRIORITIES, TICKET_TYPES } from '@ticketing/shared';
 import type { TicketPriority, TicketType } from '@ticketing/shared';
 import { buttonGhost, buttonPrimary, card, errorText, input, label, mutedText } from '@/lib/styles';
 import { uploadAttachment } from '@/lib/uploadAttachment';
+import { OptionDropdown } from '@/components/OptionDropdown';
+import { PRIORITY_CONFIG } from '@/lib/ticketPriority';
+import { TYPE_CONFIG } from '@/lib/ticketType';
 
 interface CcCandidate {
   id: string;
@@ -124,28 +127,12 @@ export function NewTicketForm() {
       <div className="flex flex-wrap gap-3">
         <label className={`${label} flex-1`}>
           Priority
-          <select
-            className={input}
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as TicketPriority)}
-          >
-            {TICKET_PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
+          <OptionDropdown value={priority} options={TICKET_PRIORITIES} config={PRIORITY_CONFIG} onChange={setPriority} />
         </label>
 
         <label className={`${label} flex-1`}>
           Type
-          <select className={input} value={type} onChange={(e) => setType(e.target.value as TicketType)}>
-            {TICKET_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
+          <OptionDropdown value={type} options={TICKET_TYPES} config={TYPE_CONFIG} onChange={setType} />
         </label>
       </div>
 
