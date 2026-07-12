@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TICKET_PRIORITIES, TICKET_STATUSES, TICKET_TYPES } from './types';
+import { CLOSE_REASONS, TICKET_PRIORITIES, TICKET_STATUSES, TICKET_TYPES } from './types';
 
 export const createTicketSchema = z.object({
   title: z.string().min(3).max(200),
@@ -34,6 +34,8 @@ export const updateTicketSchema = z.object({
   slaDueAt: z.string().datetime().nullable().optional(),
   tagIds: z.array(z.string()).optional(),
   watcherIds: z.array(z.string()).optional(),
+  resolutionMessage: z.string().min(1).max(2000).optional(),
+  closeReason: z.enum(CLOSE_REASONS).optional(),
 });
 
 /** Ticket creators (non-admin) may only edit the CC list on their own ticket. */

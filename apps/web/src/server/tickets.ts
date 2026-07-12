@@ -1,12 +1,13 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { prisma, Prisma } from '@ticketing/db';
-import type {
-  CreateInternalTicketInput,
-  CreateMessageInput,
-  CreateTicketInput,
-  TicketPriority,
-  TicketStatus,
-  UpdateTicketInput,
+import {
+  CLOSE_REASON_LABELS,
+  type CreateInternalTicketInput,
+  type CreateMessageInput,
+  type CreateTicketInput,
+  type TicketPriority,
+  type TicketStatus,
+  type UpdateTicketInput,
 } from '@ticketing/shared';
 import { AppError, NotFoundError } from '@/lib/errors';
 import { handlePendingTransition, notifyReply, notifyStatusChanged } from '@/server/notifications';
@@ -342,6 +343,20 @@ export async function addMessage(ticketId: string, authorId: string, input: Crea
   return message;
 }
 
+function buildResolutionSystemMessage(
+  status: TicketStatus,
+  closeReason: UpdateTicketInput['closeReason'],
+  resolutionMessage: UpdateTicketInput['resolutionMessage'],
+): string {
+  if (status === 'closed') {
+    const reasonLabel = closeReason ? CLOSE_REASON_LABELS[closeReason] : 'No reason given';
+    return resolutionMessage
+      ? `Ticket closed — ${reasonLabel} — ${resolutionMessage}`
+      : `Ticket closed — ${reasonLabel}`;
+  }
+  return `Ticket resolved — ${resolutionMessage ?? 'No reason given'}`;
+}
+
 export async function updateTicket(ticketId: string, input: UpdateTicketInput, actorId: string) {
   const previous = await prisma.ticket.findUnique({
     where: { id: ticketId },
@@ -400,6 +415,16 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
   });
 
   if (input.status && input.status !== previous.status) {
+    if (RESOLVED_STATUSES.includes(input.status)) {
+      await prisma.ticketMessage.create({
+        data: {
+          ticketId,
+          authorId: actorId,
+          isSystemMessage: true,
+          body: buildResolutionSystemMessage(input.status, input.closeReason, input.resolutionMessage),
+        },
+      });
+    }
     await notifyStatusChanged(ticket, input.status, actorId);
     // Deferred import: keeps env.ts's required-var validation out of the module load path for
     // pure-function unit tests (canViewTicket, isOverdue) that never call updateTicket.

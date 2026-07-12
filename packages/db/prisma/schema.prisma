@@ -250,6 +250,7 @@ model TicketMessage {
   author         User     @relation(fields: [authorId], references: [id])
   body           String
   isInternalNote Boolean  @default(false)
+  isSystemMessage Boolean @default(false)
   createdAt      DateTime @default(now())
 
   @@index([ticketId])
