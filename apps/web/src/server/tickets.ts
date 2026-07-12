@@ -11,6 +11,7 @@ import {
 } from '@ticketing/shared';
 import { AppError, NotFoundError } from '@/lib/errors';
 import { handlePendingTransition, notifyReply, notifyStatusChanged } from '@/server/notifications';
+import { publishTicketMessage } from '@/server/ticket-events';
 
 const TICKET_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const DISCORD_CLAIM_TTL_MS = 1000 * 60 * 30; // 30 minutes
@@ -416,7 +417,7 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
 
   if (input.status && input.status !== previous.status) {
     if (RESOLVED_STATUSES.includes(input.status)) {
-      await prisma.ticketMessage.create({
+      const systemMessage = await prisma.ticketMessage.create({
         data: {
           ticketId,
           authorId: actorId,
@@ -424,6 +425,17 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
           body: buildResolutionSystemMessage(input.status, input.closeReason, input.resolutionMessage),
         },
       });
+      publishTicketMessage({ ticketId, messageId: systemMessage.id });
+    } else if (RESOLVED_STATUSES.includes(previous.status as TicketStatus)) {
+      const systemMessage = await prisma.ticketMessage.create({
+        data: {
+          ticketId,
+          authorId: actorId,
+          isSystemMessage: true,
+          body: 'Ticket reopened',
+        },
+      });
+      publishTicketMessage({ ticketId, messageId: systemMessage.id });
     }
     await notifyStatusChanged(ticket, input.status, actorId);
     // Deferred import: keeps env.ts's required-var validation out of the module load path for
