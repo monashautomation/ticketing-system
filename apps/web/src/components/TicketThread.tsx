@@ -1,8 +1,18 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Lock, MessageCircle, Send } from 'lucide-react';
+import { CheckCircle2, Lock, MessageCircle, RotateCcw, Send, XCircle } from 'lucide-react';
 import { buttonPrimary, input } from '@/lib/styles';
+
+function systemMessageStyle(body: string) {
+  if (body.startsWith('Ticket reopened')) {
+    return { icon: RotateCcw, className: 'border-accent/50 bg-accent-soft text-accent' };
+  }
+  if (body.startsWith('Ticket closed')) {
+    return { icon: XCircle, className: 'border-danger/50 bg-danger-soft text-danger' };
+  }
+  return { icon: CheckCircle2, className: 'border-success/50 bg-success-soft text-success' };
+}
 
 interface Author {
   name: string;
@@ -75,16 +85,21 @@ export function TicketThread({ ticketId, token, initialMessages, canAddInternalN
             <p className="text-sm text-text-secondary">No replies yet.</p>
           </li>
         )}
-        {messages.map((message, index) =>
-          message.isSystemMessage ? (
-            <li
-              key={message.id}
-              className="animate-fade-in-up flex items-center justify-center gap-1.5 py-1 text-center text-xs text-text-tertiary"
-              style={{ animationDelay: `${Math.min(index, 6) * 25}ms` }}
-            >
-              <span className="italic">{message.body}</span>
-            </li>
-          ) : (
+        {messages.map((message, index) => {
+          if (message.isSystemMessage) {
+            const { icon: Icon, className } = systemMessageStyle(message.body);
+            return (
+              <li
+                key={message.id}
+                className={`animate-fade-in-up flex items-center gap-2 rounded-lg border p-3 text-sm font-medium ${className}`}
+                style={{ animationDelay: `${Math.min(index, 6) * 25}ms` }}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {message.body}
+              </li>
+            );
+          }
+          return (
             <li
               key={message.id}
               className={`animate-fade-in-up rounded-lg border p-3 text-sm transition-colors ${
@@ -103,8 +118,8 @@ export function TicketThread({ ticketId, token, initialMessages, canAddInternalN
               </p>
               <p className="text-text">{message.body}</p>
             </li>
-          ),
-        )}
+          );
+        })}
       </ul>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-2">
