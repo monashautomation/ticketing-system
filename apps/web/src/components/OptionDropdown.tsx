@@ -14,6 +14,7 @@ interface OptionDropdownProps<T extends string> {
   options: readonly T[];
   config: Record<T, OptionConfig>;
   disabled?: boolean;
+  className?: string;
   onChange: (value: T) => void;
 }
 
@@ -22,6 +23,7 @@ export function OptionDropdown<T extends string>({
   options,
   config,
   disabled,
+  className,
   onChange,
 }: OptionDropdownProps<T>) {
   const [open, setOpen] = useState(false);
@@ -41,10 +43,10 @@ export function OptionDropdown<T extends string>({
   const CurrentIcon = current.icon;
 
   return (
-    <div className="relative" ref={containerRef}>
+    <div className={`relative ${className ?? ''}`} ref={containerRef}>
       <button
         type="button"
-        className={`${inputSm} flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50`}
+        className={`${inputSm} flex w-full items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50`}
         disabled={disabled}
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup="listbox"
