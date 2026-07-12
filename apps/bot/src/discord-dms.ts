@@ -1,5 +1,6 @@
 import { Client } from 'discord.js';
 import { env } from './env';
+import { logger } from './logger';
 
 interface PendingDiscordDm {
   id: string;
@@ -53,7 +54,7 @@ export async function processPendingDiscordDms(client: Client): Promise<void> {
       const user = await client.users.fetch(dm.discordUserId);
       await user.send(dm.message);
     } catch (error) {
-      console.error(`Failed to send Discord DM ${dm.id} to ${dm.discordUserId}`, error);
+      logger.error(`Failed to send Discord DM ${dm.id} to ${dm.discordUserId}`, error);
     } finally {
       sentIds.push(dm.id);
     }

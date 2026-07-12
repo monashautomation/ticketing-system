@@ -1,5 +1,6 @@
 import { REST, Routes } from 'discord.js';
 import { env } from './env';
+import { logger } from './logger';
 import * as ticketCommand from './commands/ticket';
 
 const commands = [ticketCommand.data.toJSON()];
@@ -11,12 +12,12 @@ async function main() {
     : Routes.applicationCommands(env.discordClientId);
 
   await rest.put(route, { body: commands });
-  console.log(
+  logger.info(
     `Registered ${commands.length} slash commands${env.discordDevGuildId ? ' (guild scope)' : ' (global scope, may take up to 1h to propagate)'}`,
   );
 }
 
 main().catch((error) => {
-  console.error('Failed to register commands', error);
+  logger.error('Failed to register commands', error);
   process.exit(1);
 });
