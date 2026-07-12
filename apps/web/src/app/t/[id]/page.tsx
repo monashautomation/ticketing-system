@@ -10,15 +10,10 @@ import { AdminTicketControls } from '@/components/AdminTicketControls';
 import { TicketAttachments } from '@/components/TicketAttachments';
 import { TicketTitleEditor } from '@/components/TicketTitleEditor';
 import { CcEditor } from '@/components/CcEditor';
-import {
-  backLink,
-  badgeDanger,
-  badgeNeutral,
-  mutedText,
-  page,
-  priorityBadgeClass,
-  statusBadgeClass,
-} from '@/lib/styles';
+import { backLink, badgeDanger, mutedText, page } from '@/lib/styles';
+import { StatusPill } from '@/lib/ticketStatus';
+import { PriorityPill } from '@/lib/ticketPriority';
+import { TypePill } from '@/lib/ticketType';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -68,7 +63,7 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
             <p className={`mt-1 ${mutedText}`}>{ticket.description}</p>
           </div>
         )}
-        <span className={statusBadgeClass(ticket.status)}>{ticket.status}</span>
+        <StatusPill status={ticket.status} />
       </div>
 
       <p className={`mb-3 ${mutedText}`}>
@@ -79,8 +74,8 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
       </p>
 
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
-        <span className={priorityBadgeClass(ticket.priority)}>{ticket.priority}</span>
-        <span className={`${badgeNeutral} capitalize`}>{ticket.type}</span>
+        <PriorityPill priority={ticket.priority} />
+        <TypePill type={ticket.type} />
         {ticket.tags.map((tag) => (
           <span
             key={tag.id}

@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ticketing-sync-authentik
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: sync-authentik
+              image: curlimages/curl:8.11.0
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: INTERNAL_API_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: ticketing-web-secrets
+                      key: INTERNAL_API_SECRET
+              command:
+                - sh
+                - -c
+                - |
+                  curl -sf -X POST http://ticketing-web/api/internal/sync-authentik \
+                    -H "x-internal-secret: $INTERNAL_API_SECRET"

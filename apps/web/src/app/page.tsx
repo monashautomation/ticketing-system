@@ -4,14 +4,8 @@ import { getCurrentSession } from "@/lib/session";
 import { listTicketsForUser } from "@/server/tickets";
 import { AppHeader } from "@/components/AppHeader";
 import { NewTicketForm } from "@/components/NewTicketForm";
-import {
-    mutedText,
-    page,
-    pageHeader,
-    pageNarrow,
-    pageTitle,
-    statusBadgeClass,
-} from "@/lib/styles";
+import { mutedText, page, pageHeader, pageNarrow, pageTitle } from "@/lib/styles";
+import { StatusPill } from "@/lib/ticketStatus";
 
 export default async function DashboardPage() {
     const session = await getCurrentSession();
@@ -76,9 +70,7 @@ export default async function DashboardPage() {
                                     )}
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <span className={statusBadgeClass(ticket.status)}>
-                                        {ticket.status}
-                                    </span>
+                                    <StatusPill status={ticket.status} />
                                     <ChevronRight className="h-4 w-4 text-text-tertiary opacity-0 transition-opacity group-hover:opacity-100" />
                                 </div>
                             </Link>
