@@ -60,14 +60,16 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
           readinessProbe:
             exec:
-              command: ['pg_isready', '-U', '$(POSTGRES_USER)']
+              command: ['sh', '-c', 'pg_isready -h /var/run/postgresql -U "$POSTGRES_USER"']
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             exec:
-              command: ['pg_isready', '-U', '$(POSTGRES_USER)']
+              command: ['sh', '-c', 'pg_isready -h /var/run/postgresql -U "$POSTGRES_USER"']
             initialDelaySeconds: 15
             periodSeconds: 20
           resources:
@@ -81,6 +83,8 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: ticketing-postgres-data
+        - name: run
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
