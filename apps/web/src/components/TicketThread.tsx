@@ -3,15 +3,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Lock, MessageCircle, RotateCcw, Send, XCircle } from 'lucide-react';
 import { buttonPrimary, input } from '@/lib/styles';
+import { formatMessageTimestamp } from '@/lib/formatMessageTimestamp';
 
 function systemMessageStyle(body: string) {
   if (body.startsWith('Ticket reopened')) {
-    return { icon: RotateCcw, className: 'border-accent/50 bg-accent-soft text-accent' };
+    return { icon: RotateCcw, className: 'bg-accent-soft text-accent' };
   }
   if (body.startsWith('Ticket closed')) {
-    return { icon: XCircle, className: 'border-danger/50 bg-danger-soft text-danger' };
+    return { icon: XCircle, className: 'bg-danger-soft text-danger' };
   }
-  return { icon: CheckCircle2, className: 'border-success/50 bg-success-soft text-success' };
+  return { icon: CheckCircle2, className: 'bg-success-soft text-success' };
 }
 
 interface Author {
@@ -91,11 +92,14 @@ export function TicketThread({ ticketId, token, initialMessages, canAddInternalN
             return (
               <li
                 key={message.id}
-                className={`animate-fade-in-up flex items-center gap-2 rounded-lg border p-3 text-sm font-medium ${className}`}
+                className={`animate-fade-in-up flex items-center gap-2 rounded-lg p-3 text-sm font-medium ${className}`}
                 style={{ animationDelay: `${Math.min(index, 6) * 25}ms` }}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                {message.body}
+                <span className="flex-1">{message.body}</span>
+                <span className="shrink-0 text-xs font-normal opacity-70">
+                  {formatMessageTimestamp(message.createdAt)}
+                </span>
               </li>
             );
           }
@@ -115,6 +119,9 @@ export function TicketThread({ ticketId, token, initialMessages, canAddInternalN
                     internal note
                   </span>
                 )}
+                <span className="ml-auto font-normal text-text-tertiary">
+                  {formatMessageTimestamp(message.createdAt)}
+                </span>
               </p>
               <p className="text-text">{message.body}</p>
             </li>
