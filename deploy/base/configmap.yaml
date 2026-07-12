@@ -3,14 +3,15 @@ kind: ConfigMap
 metadata:
   name: ticketing-web-config
 data:
-  BETTER_AUTH_URL: "https://tickets.example.com"
-  PUBLIC_APP_URL: "https://tickets.example.com"
-  AUTHENTIK_ISSUER: "https://auth.example.com/application/o/ticketing/"
-  ADMIN_GROUPS: "ticketing-admins"
-  S3_ENDPOINT: "https://s3.example.com"
-  S3_REGION: "us-east-1"
+  BETTER_AUTH_URL: "https://tickets.monashautomation.com"
+  PUBLIC_APP_URL: "https://tickets.monashautomation.com"
+  AUTHENTIK_ISSUER: "https://auth.monashautomation.com/application/o/ticketing-system/"
+  ADMIN_GROUPS: "infrastructure,executive_team"
+  S3_ENDPOINT: "https://s3.monashautomation.com"
+  S3_INTERNAL_ENDPOINT: "http://ticketing-minio:9000"
+  S3_REGION: "ap-southeast-2"
   S3_BUCKET: "ticketing-attachments"
-  S3_FORCE_PATH_STYLE: "false"
+  S3_FORCE_PATH_STYLE: "true"
   NODE_ENV: "production"
 ---
 apiVersion: v1
@@ -20,3 +21,11 @@ metadata:
 data:
   INTERNAL_API_URL: "http://ticketing-web"
   NODE_ENV: "production"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ticketing-minio-config
+data:
+  S3_BUCKET: "ticketing-attachments"
+  MINIO_API_CORS_ALLOW_ORIGIN: "https://tickets.monashautomation.com"

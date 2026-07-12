@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/ORG/ticketing-system.git
+    repoURL: https://github.com/monashautomation/ticketing-system.git
     targetRevision: main
     path: deploy/overlays/prod
   destination:
