@@ -14,9 +14,7 @@ import {
   pageHeader,
   pageTitle,
   pageWide,
-  priorityBadgeClass,
   select,
-  statusBadgeClass,
   table,
   tableCell,
   tableHead,
@@ -24,6 +22,8 @@ import {
   tableRowDivider,
   tableWrap,
 } from '@/lib/styles';
+import { STATUS_CONFIG, StatusPill } from '@/lib/ticketStatus';
+import { PRIORITY_CONFIG, PriorityPill } from '@/lib/ticketPriority';
 
 interface PageProps {
   searchParams: Promise<{
@@ -36,12 +36,6 @@ interface PageProps {
   }>;
 }
 
-const SECTION_LABELS: Record<'open' | 'escalated' | 'pending' | 'in_progress', string> = {
-  open: 'Open',
-  escalated: 'Escalated',
-  pending: 'Pending',
-  in_progress: 'In Progress',
-};
 
 function TicketTable({
   tickets,
@@ -74,10 +68,10 @@ function TicketTable({
                 </td>
                 <td className={`${tableCell} text-text-secondary`}>{ticket.createdBy.name}</td>
                 <td className={tableCell}>
-                  <span className={statusBadgeClass(ticket.status)}>{ticket.status}</span>
+                  <StatusPill status={ticket.status} />
                 </td>
                 <td className={tableCell}>
-                  <span className={priorityBadgeClass(ticket.priority)}>{ticket.priority}</span>
+                  <PriorityPill priority={ticket.priority} />
                 </td>
                 <td className={`${tableCell} text-text-secondary`}>
                   {ticket.assignees.length > 0 ? ticket.assignees.map((a) => a.name).join(', ') : '—'}
@@ -160,7 +154,7 @@ export default async function AdminQueuePage({ searchParams }: PageProps) {
             <option value="">Any status</option>
             {TICKET_STATUSES.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {STATUS_CONFIG[s].label}
               </option>
             ))}
           </select>
@@ -168,7 +162,7 @@ export default async function AdminQueuePage({ searchParams }: PageProps) {
             <option value="">Any priority</option>
             {TICKET_PRIORITIES.map((p) => (
               <option key={p} value={p}>
-                {p}
+                {PRIORITY_CONFIG[p].label}
               </option>
             ))}
           </select>
@@ -201,7 +195,7 @@ export default async function AdminQueuePage({ searchParams }: PageProps) {
           {(['open', 'escalated', 'pending', 'in_progress'] as const).map((status) => (
             <section key={status}>
               <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-secondary">
-                {SECTION_LABELS[status]} ({active[status].length})
+                {STATUS_CONFIG[status].label} ({active[status].length})
               </h2>
               <TicketTable tickets={active[status]} />
             </section>

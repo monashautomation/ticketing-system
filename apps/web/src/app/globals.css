@@ -11,9 +11,9 @@
   --text: #eeeef0;
   --text-secondary: #93939c;
   --text-tertiary: #67676f;
-  --accent: #6e6ef6;
-  --accent-hover: #8080f8;
-  --accent-soft: rgb(110 110 246 / 0.14);
+  --accent: #1393ff;
+  --accent-hover: #3aa5ff;
+  --accent-soft: rgb(19 147 255 / 0.14);
   --danger: #f0555c;
   --danger-soft: rgb(240 85 92 / 0.12);
   --success: #4dc38a;
