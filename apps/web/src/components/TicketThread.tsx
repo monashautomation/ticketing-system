@@ -12,6 +12,7 @@ interface Message {
   id: string;
   body: string;
   isInternalNote: boolean;
+  isSystemMessage: boolean;
   createdAt: string | Date;
   author: Author;
 }
@@ -74,26 +75,36 @@ export function TicketThread({ ticketId, token, initialMessages, canAddInternalN
             <p className="text-sm text-text-secondary">No replies yet.</p>
           </li>
         )}
-        {messages.map((message, index) => (
-          <li
-            key={message.id}
-            className={`animate-fade-in-up rounded-lg border p-3 text-sm transition-colors ${
-              message.isInternalNote ? 'border-warning/40 bg-warning-soft' : 'border-border bg-panel'
-            }`}
-            style={{ animationDelay: `${Math.min(index, 6) * 25}ms` }}
-          >
-            <p className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
-              {message.author.name}
-              {message.isInternalNote && (
-                <span className="inline-flex items-center gap-1">
-                  <Lock className="h-3 w-3" />
-                  internal note
-                </span>
-              )}
-            </p>
-            <p className="text-text">{message.body}</p>
-          </li>
-        ))}
+        {messages.map((message, index) =>
+          message.isSystemMessage ? (
+            <li
+              key={message.id}
+              className="animate-fade-in-up flex items-center justify-center gap-1.5 py-1 text-center text-xs text-text-tertiary"
+              style={{ animationDelay: `${Math.min(index, 6) * 25}ms` }}
+            >
+              <span className="italic">{message.body}</span>
+            </li>
+          ) : (
+            <li
+              key={message.id}
+              className={`animate-fade-in-up rounded-lg border p-3 text-sm transition-colors ${
+                message.isInternalNote ? 'border-warning/40 bg-warning-soft' : 'border-border bg-panel'
+              }`}
+              style={{ animationDelay: `${Math.min(index, 6) * 25}ms` }}
+            >
+              <p className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
+                {message.author.name}
+                {message.isInternalNote && (
+                  <span className="inline-flex items-center gap-1">
+                    <Lock className="h-3 w-3" />
+                    internal note
+                  </span>
+                )}
+              </p>
+              <p className="text-text">{message.body}</p>
+            </li>
+          ),
+        )}
       </ul>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-2">

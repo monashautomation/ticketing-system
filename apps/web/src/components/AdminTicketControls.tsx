@@ -4,14 +4,28 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import {
+  CLOSE_REASONS,
+  CLOSE_REASON_LABELS,
   TICKET_PRIORITIES,
   TICKET_STATUSES,
   TICKET_TYPES,
+  type CloseReason,
   type TicketPriority,
   type TicketStatus,
   type TicketType,
 } from '@ticketing/shared';
-import { badgeWarning, card, input, inputSm, labelInline, mutedText } from '@/lib/styles';
+import {
+  badgeWarning,
+  buttonGhost,
+  buttonPrimary,
+  card,
+  input,
+  inputSm,
+  label as labelStack,
+  labelInline,
+  mutedText,
+  select as selectStyle,
+} from '@/lib/styles';
 import { CcEditor } from '@/components/CcEditor';
 import { OptionDropdown } from '@/components/OptionDropdown';
 import { STATUS_CONFIG } from '@/lib/ticketStatus';
@@ -67,6 +81,9 @@ export function AdminTicketControls({
   const [selectedAssignees, setSelectedAssignees] = useState<AdminOption[]>(currentAssignees);
   const [assigneeQuery, setAssigneeQuery] = useState('');
   const [assigneeResults, setAssigneeResults] = useState<AdminOption[]>([]);
+  const [pendingCloseStatus, setPendingCloseStatus] = useState<'resolved' | 'closed' | null>(null);
+  const [resolutionMessage, setResolutionMessage] = useState('');
+  const [closeReason, setCloseReason] = useState<CloseReason>('not_planned');
 
   useEffect(() => {
     const query = assigneeQuery.trim();
@@ -117,6 +134,32 @@ export function AdminTicketControls({
     update({ assigneeIds: next.map((a) => a.id) });
   }
 
+  function handleStatusChange(status: TicketStatus) {
+    if (status === 'resolved' || status === 'closed') {
+      setResolutionMessage('');
+      setCloseReason('not_planned');
+      setPendingCloseStatus(status);
+      return;
+    }
+    update({ status });
+  }
+
+  function cancelClose() {
+    setPendingCloseStatus(null);
+  }
+
+  function confirmClose() {
+    if (!pendingCloseStatus) return;
+    const patch: Record<string, unknown> =
+      pendingCloseStatus === 'resolved'
+        ? { status: pendingCloseStatus, resolutionMessage }
+        : { status: pendingCloseStatus, closeReason, resolutionMessage: resolutionMessage || undefined };
+    update(patch);
+    setPendingCloseStatus(null);
+  }
+
+  const confirmDisabled = pendingCloseStatus === 'resolved' && resolutionMessage.trim().length === 0;
+
   return (
     <div className={`${card} mb-6 flex flex-col gap-3`}>
       <div className="flex flex-wrap items-center gap-3">
@@ -127,7 +170,7 @@ export function AdminTicketControls({
             options={TICKET_STATUSES}
             config={STATUS_CONFIG}
             disabled={isSaving}
-            onChange={(status) => update({ status })}
+            onChange={handleStatusChange}
           />
         </label>
 
@@ -248,6 +291,72 @@ export function AdminTicketControls({
       </div>
 
       <CcEditor ticketId={ticketId} initialWatchers={currentWatchers} />
+
+      {pendingCloseStatus && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className={`${card} w-full max-w-sm animate-fade-in-up`}>
+            <h2 className="mb-1 text-sm font-semibold text-text">
+              Mark ticket as {pendingCloseStatus}?
+            </h2>
+            <p className={`mb-4 ${mutedText}`}>Are you sure? This is recorded in the ticket thread.</p>
+
+            {pendingCloseStatus === 'resolved' ? (
+              <label className={`${labelStack} mb-4`}>
+                Resolution message
+                <textarea
+                  className={input}
+                  rows={3}
+                  autoFocus
+                  placeholder="What was done to resolve this?"
+                  value={resolutionMessage}
+                  onChange={(e) => setResolutionMessage(e.target.value)}
+                />
+              </label>
+            ) : (
+              <div className="mb-4 flex flex-col gap-3">
+                <label className={labelStack}>
+                  Reason
+                  <select
+                    className={selectStyle}
+                    value={closeReason}
+                    onChange={(e) => setCloseReason(e.target.value as CloseReason)}
+                  >
+                    {CLOSE_REASONS.map((reason) => (
+                      <option key={reason} value={reason}>
+                        {CLOSE_REASON_LABELS[reason]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={labelStack}>
+                  Details (optional)
+                  <textarea
+                    className={input}
+                    rows={2}
+                    placeholder="Additional context…"
+                    value={resolutionMessage}
+                    onChange={(e) => setResolutionMessage(e.target.value)}
+                  />
+                </label>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button type="button" className={buttonGhost} onClick={cancelClose} disabled={isSaving}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={buttonPrimary}
+                onClick={confirmClose}
+                disabled={isSaving || confirmDisabled}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,21 @@ export const TICKET_STATUSES = [
 ] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
+export const CLOSE_REASONS = [
+  'not_planned',
+  'duplicate',
+  'wont_fix',
+  'other',
+] as const;
+export type CloseReason = (typeof CLOSE_REASONS)[number];
+
+export const CLOSE_REASON_LABELS: Record<CloseReason, string> = {
+  not_planned: 'Not planned',
+  duplicate: 'Duplicate',
+  wont_fix: "Won't fix",
+  other: 'Other',
+};
+
 export const TICKET_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 export type TicketPriority = (typeof TICKET_PRIORITIES)[number];
 
