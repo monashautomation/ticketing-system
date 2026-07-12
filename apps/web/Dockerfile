@@ -29,7 +29,11 @@ ENV DATABASE_URL="postgresql://build:build@localhost:5432/build" \
     AUTHENTIK_API_TOKEN="build-placeholder" \
     ADMIN_GROUPS="ticketing-admins" \
     INTERNAL_API_SECRET="build-placeholder" \
-    UPTIME_KUMA_WEBHOOK_SECRET="build-placeholder"
+    UPTIME_KUMA_WEBHOOK_SECRET="build-placeholder" \
+    S3_ENDPOINT="http://localhost:9000" \
+    S3_BUCKET="build-placeholder" \
+    S3_ACCESS_KEY_ID="build-placeholder" \
+    S3_SECRET_ACCESS_KEY="build-placeholder"
 RUN pnpm --filter web build
 
 FROM base AS runner
