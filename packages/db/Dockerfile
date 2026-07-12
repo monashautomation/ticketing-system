@@ -9,5 +9,7 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/package.json
 RUN pnpm install --frozen-lockfile --filter @ticketing/db
 COPY packages/db/prisma packages/db/prisma
+RUN chown -R node:node /repo
 WORKDIR /repo/packages/db
+USER node
 CMD ["npx", "prisma", "migrate", "deploy"]

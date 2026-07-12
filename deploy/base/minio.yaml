@@ -1,0 +1,129 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ticketing-minio-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ticketing-minio
+  labels:
+    app: ticketing-minio
+spec:
+  replicas: 1 # single-writer PVC (ReadWriteOnce) — do not scale without switching to distributed minio
+  strategy:
+    type: Recreate # avoid two pods mounting the same RWO volume during rollout
+  selector:
+    matchLabels:
+      app: ticketing-minio
+  template:
+    metadata:
+      labels:
+        app: ticketing-minio
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          args: ['server', '/data', '--console-address', ':9001']
+          envFrom:
+            - configMapRef:
+                name: ticketing-minio-config
+            - secretRef:
+                name: ticketing-minio-secrets
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ticketing-minio-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ticketing-minio
+spec:
+  selector:
+    app: ticketing-minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ticketing-minio-init
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: minio-init
+          image: minio/mc:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - configMapRef:
+                name: ticketing-minio-config
+            - secretRef:
+                name: ticketing-minio-secrets
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              until mc alias set local http://ticketing-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do sleep 2; done
+              mc mb -p "local/$S3_BUCKET"
