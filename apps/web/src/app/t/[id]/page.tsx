@@ -41,6 +41,7 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
   const isOwner = user?.id === ticket.createdById;
   const visibleMessages = isAdmin ? ticket.messages : ticket.messages.filter((m) => !m.isInternalNote);
   const overdue = isOverdue(ticket);
+  const isClosed = ticket.status === 'closed';
 
   return (
     <>
@@ -50,7 +51,7 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
         ← Back to tickets
       </Link>
 
-      <div className="mb-6 flex items-start justify-between gap-4">
+      <div className={`mb-6 flex items-start justify-between gap-4 ${isClosed ? 'opacity-60' : ''}`}>
         {isAdmin ? (
           <TicketTitleEditor
             ticketId={ticket.id}
@@ -66,14 +67,14 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
         <StatusPill status={ticket.status} />
       </div>
 
-      <p className={`mb-3 ${mutedText}`}>
+      <p className={`mb-3 ${mutedText} ${isClosed ? 'opacity-60' : ''}`}>
         Opened by {ticket.createdBy.name}
         {ticket.assignees.length > 0
           ? ` · assigned to ${ticket.assignees.map((a) => a.name).join(', ')}`
           : ' · unassigned'}
       </p>
 
-      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+      <div className={`mb-3 flex flex-wrap items-center gap-1.5 ${isClosed ? 'opacity-60' : ''}`}>
         <PriorityPill priority={ticket.priority} />
         <TypePill type={ticket.type} />
         {ticket.tags.map((tag) => (
