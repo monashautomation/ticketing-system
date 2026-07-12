@@ -8,10 +8,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - tickets.example.com
+        - tickets.monashautomation.com
       secretName: ticketing-web-tls
   rules:
-    - host: tickets.example.com
+    - host: tickets.monashautomation.com
       http:
         paths:
           - path: /
@@ -21,3 +21,30 @@ spec:
                 name: ticketing-web
                 port:
                   number: 80
+---
+# Public route to minio's S3 API — presigned upload/download URLs are handed
+# to the browser, which PUTs/GETs directly against this host (see
+# S3_ENDPOINT in configmap.yaml). Must be reachable from outside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ticketing-minio
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - s3.monashautomation.com
+      secretName: ticketing-minio-tls
+  rules:
+    - host: s3.monashautomation.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ticketing-minio
+                port:
+                  number: 9000

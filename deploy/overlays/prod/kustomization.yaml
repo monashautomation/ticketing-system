@@ -3,7 +3,6 @@ kind: Kustomization
 namespace: ticketing
 resources:
   - ../../base
-  - sealed-secrets.yaml
 images:
   - name: ghcr.io/monashautomation/ticketing-web
     newTag: latest

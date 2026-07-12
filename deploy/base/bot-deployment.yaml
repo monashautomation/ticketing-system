@@ -14,9 +14,18 @@ spec:
       labels:
         app: ticketing-bot
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: bot
           image: ghcr.io/monashautomation/ticketing-bot:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           envFrom:
             - configMapRef:
                 name: ticketing-bot-config

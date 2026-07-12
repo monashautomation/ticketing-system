@@ -101,6 +101,7 @@ and fill in real values. Per-app `.env.example` files exist too, for running
 | `BETTER_AUTH_URL` / `PUBLIC_APP_URL` | web | Public URL of the web app |
 | `AUTHENTIK_ISSUER` | web | Authentik OIDC issuer URL |
 | `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` | web | From the Authentik application |
+| `AUTHENTIK_API_TOKEN` | web | Authentik API token with read access to `core/users/`, used to sync the user directory |
 | `ADMIN_GROUPS` | web | Comma-separated Authentik group names → admin role |
 | `INTERNAL_API_SECRET` | web, bot | Shared secret between bot and web's internal API |
 | `UPTIME_KUMA_WEBHOOK_SECRET` | web | Sent as `?secret=` query param on the Kuma webhook URL |
@@ -168,7 +169,12 @@ Production runs as containers on Kubernetes, deployed via ArgoCD (GitOps) —
 not `docker compose up` on a server.
 
 - `deploy/base` — Deployments/Services/Ingress/ConfigMaps + the migration
-  `Job` (kustomize base)
+  `Job` (kustomize base). Includes a self-hosted minio Deployment
+  (`minio.yaml`) for ticket attachments, with its own public `Ingress` at
+  `S3_ENDPOINT` (browser needs direct access for presigned uploads) — swap
+  for a real AWS S3 bucket instead by deleting `minio.yaml` from
+  `kustomization.yaml` and pointing `S3_ENDPOINT`/`S3_INTERNAL_ENDPOINT` at
+  AWS.
 - `deploy/overlays/prod` — prod-specific patches + image tags
 - `argocd/application.yaml` — ArgoCD `Application` pointing at
   `deploy/overlays/prod`
@@ -192,6 +198,10 @@ Deployments, so the schema is always migrated ahead of the new pods starting.
    `S3_SECRET_ACCESS_KEY` pair — the non-secret S3 vars (`S3_ENDPOINT`,
    `S3_REGION`, `S3_BUCKET`, `S3_FORCE_PATH_STYLE`) live in
    `deploy/base/configmap.yaml` and need real values for your bucket too.
+   For the bundled minio, `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` must
+   match `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` in `ticketing-minio-secrets`
+   — same credentials in both Secrets. A `PostSync` Job
+   (`ticketing-minio-init`) creates the bucket automatically on first sync.
 3. `kubectl apply -f argocd/application.yaml`
 4. Register Discord slash commands globally: run `pnpm --filter bot register`
    once with prod's `DISCORD_TOKEN`/`DISCORD_CLIENT_ID` and
