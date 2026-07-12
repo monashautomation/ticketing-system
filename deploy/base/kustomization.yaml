@@ -4,6 +4,7 @@ resources:
   - web-deployment.yaml
   - bot-deployment.yaml
   - migration-job.yaml
+  - sync-authentik-cronjob.yaml
   - minio.yaml
   - postgres.yaml
   - external-secrets.yaml
