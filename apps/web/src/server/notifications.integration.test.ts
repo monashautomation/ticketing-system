@@ -242,7 +242,7 @@ describe('status-change notifications (via updateTicket)', () => {
     const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id, kind: 'status_updated' } });
     expect(dms).toHaveLength(1);
     expect(dms[0]?.message).toBe(
-      `Your ticket has been updated — view it here: ${env.publicAppUrl}/t/${ticket.id}`,
+      `Your ticket has been updated. View it here: ${env.publicAppUrl}/t/${ticket.id}`,
     );
   });
 
