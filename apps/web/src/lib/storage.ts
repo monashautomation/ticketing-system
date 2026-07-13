@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env } from './env';
@@ -30,7 +29,7 @@ const s3Internal = new S3Client({
 
 export function buildAttachmentKey(ticketId: string, fileName: string): string {
   const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  return `tickets/${ticketId}/${randomUUID()}-${safeName}`;
+  return `tickets/${ticketId}/${crypto.randomUUID()}-${safeName}`;
 }
 
 export async function getUploadUrl(storageKey: string, mimeType: string): Promise<string> {
