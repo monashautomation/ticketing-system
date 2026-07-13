@@ -6,12 +6,9 @@ import { UnauthorizedError } from '@/lib/errors';
 import { env } from '@/lib/env';
 import { handleUptimeKumaWebhook } from '@/server/maintenance';
 
-// Uptime Kuma's built-in Webhook notification provider only lets you set a
-// target URL (no custom headers in most versions), so the shared secret is
-// passed as a query param on that configured URL instead of a header.
 function requireWebhookSecret(request: Request): void {
-  const url = new URL(request.url);
-  const provided = url.searchParams.get('secret') ?? '';
+  const header = request.headers.get('authorization') ?? '';
+  const provided = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
   const expected = env.uptimeKumaWebhookSecret;
 
   const a = Buffer.from(provided);
