@@ -1,6 +1,6 @@
-import { Client } from 'discord.js';
 import { env } from './env';
 import { logger } from './logger';
+import { sendDiscordDm } from './discord-dm-api';
 
 interface PendingDiscordDm {
   id: string;
@@ -40,19 +40,19 @@ function markDiscordDmsSent(ids: string[]) {
 }
 
 /**
- * Polls the web app for queued outbound DMs and sends them. Marks every attempted DM as sent
- * regardless of delivery outcome (e.g. the recipient has DMs closed) -- same "best effort, never
- * retry forever" tradeoff as the ephemeral-reply DM in commands/ticket.ts.
+ * Polls the web app for queued outbound DMs and sends them via the external Discord bot HTTP
+ * API. Marks every attempted DM as sent regardless of delivery outcome (e.g. the recipient has
+ * DMs closed) -- same "best effort, never retry forever" tradeoff as the ephemeral-reply DM in
+ * commands/ticket.ts.
  */
-export async function processPendingDiscordDms(client: Client): Promise<void> {
+export async function processPendingDiscordDms(): Promise<void> {
   const pending = await listPendingDiscordDms();
   if (pending.length === 0) return;
 
   const sentIds: string[] = [];
   for (const dm of pending) {
     try {
-      const user = await client.users.fetch(dm.discordUserId);
-      await user.send(dm.message);
+      await sendDiscordDm(dm.discordUserId, dm.message);
     } catch (error) {
       logger.error(`Failed to send Discord DM ${dm.id} to ${dm.discordUserId}`, error);
     } finally {

@@ -45,11 +45,10 @@ client.once(Events.ClientReady, (readyClient) => {
     registeredCommands: [...commands.keys()],
   });
 
-  // Started only once login succeeds -- sending DMs needs the live gateway connection.
+  // Started only once login succeeds -- kept tied to ready state even though DM sending
+  // now goes over HTTP rather than the gateway, so it stops if the bot can't log in.
   setInterval(() => {
-    processPendingDiscordDms(readyClient).catch((error) =>
-      logger.error('Discord DM poll failed', error),
-    );
+    processPendingDiscordDms().catch((error) => logger.error('Discord DM poll failed', error));
   }, DISCORD_DM_POLL_INTERVAL_MS);
 });
 

@@ -107,6 +107,8 @@ and fill in real values. Per-app `.env.example` files exist too, for running
 | `UPTIME_KUMA_WEBHOOK_SECRET` | web | Sent as `?secret=` query param on the Kuma webhook URL |
 | `DISCORD_TOKEN` / `DISCORD_CLIENT_ID` | bot | From the Discord application |
 | `DISCORD_DEV_GUILD_ID` | bot | Optional, guild-scoped commands for dev |
+| `DISCORD_DM_API_KEY` | bot | Bearer key for the external Discord bot HTTP API used to send DMs |
+| `DISCORD_DM_API_URL` | bot | Optional, defaults to `https://discordbot.monashautomation.com` |
 | `S3_ENDPOINT` | web | Must be reachable from the **browser** — presigned upload/download URLs are handed to the client directly, not proxied |
 | `S3_REGION` | web | Defaults to `us-east-1`; minio ignores the value but the SDK requires one |
 | `S3_BUCKET` | web | Bucket for ticket attachments (created automatically by the `minio-init` compose service in dev) |

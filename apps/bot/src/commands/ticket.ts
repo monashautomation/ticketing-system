@@ -8,6 +8,8 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { createTicket } from '../api-client';
+import { sendDiscordDm } from '../discord-dm-api';
+import { logger } from '../logger';
 
 export const data = new SlashCommandBuilder()
   .setName('ticket')
@@ -65,9 +67,12 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction) {
 
     await interaction.editReply(`Hey, here's your ticket: ${result.url}`);
 
-    await interaction.user.send(`Hey, here's your ticket: ${result.url}`).catch(() => {
-      // DMs closed — the ephemeral reply above already has the link, nothing further to do.
-    });
+    await sendDiscordDm(interaction.user.id, `Hey, here's your ticket: ${result.url}`).catch(
+      (error) => {
+        // DMs closed (or API error) — the ephemeral reply above already has the link.
+        logger.error(`Failed to DM ticket confirmation to ${interaction.user.id}`, error);
+      },
+    );
   } catch (error) {
     await interaction.editReply(
       `Couldn't create your ticket: ${error instanceof Error ? error.message : 'unknown error'}`,

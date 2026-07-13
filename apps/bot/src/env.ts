@@ -15,6 +15,8 @@ export const env = {
   discordDevGuildId: process.env.DISCORD_DEV_GUILD_ID || undefined,
   internalApiUrl: required('INTERNAL_API_URL'),
   internalApiSecret: required('INTERNAL_API_SECRET'),
+  discordDmApiUrl: process.env.DISCORD_DM_API_URL || 'https://discordbot.monashautomation.com',
+  discordDmApiKey: required('DISCORD_DM_API_KEY'),
   debugLogging: process.env.LOG_LEVEL === 'debug',
 };
 

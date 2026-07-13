@@ -99,6 +99,8 @@ services:
       DISCORD_DEV_GUILD_ID: ${DISCORD_DEV_GUILD_ID:-}
       INTERNAL_API_URL: http://web:3000
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-internal-secret}
+      DISCORD_DM_API_URL: ${DISCORD_DM_API_URL:-}
+      DISCORD_DM_API_KEY: ${DISCORD_DM_API_KEY}
     depends_on:
       - web
 
