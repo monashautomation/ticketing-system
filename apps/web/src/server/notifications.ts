@@ -142,9 +142,9 @@ const STATUS_LABELS: Partial<Record<TicketStatus, string>> = {
 function statusDmMessage(status: TicketStatus, baseUrl: string, ticketId: string): string | null {
   const link = ticketLink(baseUrl, ticketId);
   if (status === 'pending') return null;
-  if (status === 'closed') return `Your ticket has been closed — view it here: ${link}`;
-  if (status === 'resolved') return `Your ticket has been resolved — view it here: ${link}`;
-  return `Your ticket has been updated — view it here: ${link}`;
+  if (status === 'closed') return `Your ticket has been closed. View it here: ${link}`;
+  if (status === 'resolved') return `Your ticket has been resolved. View it here: ${link}`;
+  return `Your ticket has been updated. View it here: ${link}`;
 }
 
 export async function notifyStatusChanged(

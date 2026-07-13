@@ -366,10 +366,10 @@ function buildResolutionSystemMessage(
   if (status === 'closed') {
     const reasonLabel = closeReason ? CLOSE_REASON_LABELS[closeReason] : 'No reason given';
     return resolutionMessage
-      ? `Ticket closed — ${reasonLabel} — ${resolutionMessage}`
-      : `Ticket closed — ${reasonLabel}`;
+      ? `Ticket closed: ${reasonLabel}: ${resolutionMessage}`
+      : `Ticket closed: ${reasonLabel}`;
   }
-  return `Ticket resolved — ${resolutionMessage ?? 'No reason given'}`;
+  return `Ticket resolved: ${resolutionMessage ?? 'No reason given'}`;
 }
 
 export async function updateTicket(ticketId: string, input: UpdateTicketInput, actorId: string) {
