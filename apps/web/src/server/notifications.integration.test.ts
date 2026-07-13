@@ -204,7 +204,7 @@ describe('status-change notifications (via updateTicket)', () => {
     const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id, kind: 'closed' } });
     expect(dms).toHaveLength(1);
     expect(dms[0]?.message).toBe(
-      `Your ticket has been closed — view it here: ${env.publicAppUrl}/t/${ticket.id}`,
+      `Your ticket has been closed. View it here: ${env.publicAppUrl}/t/${ticket.id}`,
     );
   });
 
@@ -223,7 +223,7 @@ describe('status-change notifications (via updateTicket)', () => {
     const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id, kind: 'resolved' } });
     expect(dms).toHaveLength(1);
     expect(dms[0]?.message).toBe(
-      `Your ticket has been resolved — view it here: ${env.publicAppUrl}/t/${ticket.id}`,
+      `Your ticket has been resolved. View it here: ${env.publicAppUrl}/t/${ticket.id}`,
     );
   });
 

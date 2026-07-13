@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronRight, Inbox } from "lucide-react";
 import { getCurrentSession } from "@/lib/session";
-import { listTicketsForUser } from "@/server/tickets";
+import { groupTicketsByStatus, listTicketsForUser } from "@/server/tickets";
 import { AppHeader } from "@/components/AppHeader";
 import { NewTicketForm } from "@/components/NewTicketForm";
 import { mutedText, page, pageHeader, pageNarrow, pageTitle } from "@/lib/styles";
@@ -25,6 +25,8 @@ export default async function DashboardPage() {
     }
 
     const tickets = await listTicketsForUser(session.user.id);
+    const { active, closedOrResolved } = groupTicketsByStatus(tickets);
+    const activeTickets = Object.values(active).flat();
 
     return (
         <>
@@ -37,44 +39,8 @@ export default async function DashboardPage() {
                 <NewTicketForm />
 
                 <ul className="mt-8 divide-y divide-border">
-                    {tickets.map((ticket, index) => (
-                        <li
-                            key={ticket.id}
-                            className="animate-fade-in-up py-4"
-                            style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
-                        >
-                            <Link
-                                href={`/t/${ticket.id}`}
-                                className="group flex items-center justify-between gap-4 rounded-md px-2 -mx-2 transition-all hover:translate-x-0.5 hover:bg-panel"
-                            >
-                                <div>
-                                    <p className="font-medium text-text">{ticket.title}</p>
-                                    <p className={mutedText}>
-                                        {ticket.createdBy.name}
-                                        {ticket.assignees.length > 0
-                                            ? ` · assigned to ${ticket.assignees.map((a) => a.name).join(", ")}`
-                                            : ""}
-                                    </p>
-                                    {ticket.tags.length > 0 && (
-                                        <div className="mt-1.5 flex flex-wrap gap-1">
-                                            {ticket.tags.map((tag) => (
-                                                <span
-                                                    key={tag.id}
-                                                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium text-white"
-                                                    style={{ backgroundColor: tag.color }}
-                                                >
-                                                    {tag.name}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <StatusPill status={ticket.status} />
-                                    <ChevronRight className="h-4 w-4 text-text-tertiary opacity-0 transition-opacity group-hover:opacity-100" />
-                                </div>
-                            </Link>
-                        </li>
+                    {activeTickets.map((ticket, index) => (
+                        <TicketRow key={ticket.id} ticket={ticket} index={index} />
                     ))}
                     {tickets.length === 0 && (
                         <div className="flex flex-col items-center gap-2 py-12 text-center">
@@ -83,7 +49,68 @@ export default async function DashboardPage() {
                         </div>
                     )}
                 </ul>
+
+                {closedOrResolved.length > 0 && (
+                    <details className="group mt-4">
+                        <summary className="cursor-pointer list-none text-sm font-semibold uppercase tracking-wide text-text-secondary">
+                            <span className="inline-block transition-transform group-open:rotate-90">▸</span>{" "}
+                            Resolved &amp; Closed ({closedOrResolved.length})
+                        </summary>
+                        <ul className="mt-2 divide-y divide-border">
+                            {closedOrResolved.map((ticket, index) => (
+                                <TicketRow key={ticket.id} ticket={ticket} index={index} />
+                            ))}
+                        </ul>
+                    </details>
+                )}
             </main>
         </>
+    );
+}
+
+function TicketRow({
+    ticket,
+    index,
+}: {
+    ticket: Awaited<ReturnType<typeof listTicketsForUser>>[number];
+    index: number;
+}) {
+    return (
+        <li
+            className="animate-fade-in-up py-4"
+            style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
+        >
+            <Link
+                href={`/t/${ticket.id}`}
+                className="group flex items-center justify-between gap-4 rounded-md px-2 -mx-2 transition-all hover:translate-x-0.5 hover:bg-panel"
+            >
+                <div>
+                    <p className="font-medium text-text">{ticket.title}</p>
+                    <p className={mutedText}>
+                        {ticket.createdBy.name}
+                        {ticket.assignees.length > 0
+                            ? ` · assigned to ${ticket.assignees.map((a) => a.name).join(", ")}`
+                            : ""}
+                    </p>
+                    {ticket.tags.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                            {ticket.tags.map((tag) => (
+                                <span
+                                    key={tag.id}
+                                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                                    style={{ backgroundColor: tag.color }}
+                                >
+                                    {tag.name}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                <div className="flex items-center gap-2">
+                    <StatusPill status={ticket.status} />
+                    <ChevronRight className="h-4 w-4 text-text-tertiary opacity-0 transition-opacity group-hover:opacity-100" />
+                </div>
+            </Link>
+        </li>
     );
 }
