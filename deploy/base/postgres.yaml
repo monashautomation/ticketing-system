@@ -17,6 +17,7 @@ metadata:
     app: ticketing-postgres
 spec:
   replicas: 1 # single-writer PVC (ReadWriteOnce) — do not scale
+  revisionHistoryLimit: 3
   strategy:
     type: Recreate # avoid two pods mounting the same RWO volume during rollout
   selector:
