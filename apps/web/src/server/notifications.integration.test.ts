@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '@ticketing/db';
 import { resetDatabase, createTestUser } from '@/test/db';
 import { env } from '@/lib/env';
-import { addMessage, createTicket, updateTicket } from './tickets';
+import { addMessage, createTicket, createTicketFromDiscord, updateTicket } from './tickets';
 import {
   countUnreadNotifications,
   listNotificationsForUser,
@@ -12,13 +12,55 @@ import {
   markNotificationRead,
   markTicketNotificationsRead,
   queuePendingEscalationDms,
-  queueUnreadReplyDms,
 } from './notifications';
 
 const BASE_URL = 'https://tickets.test';
 
 beforeEach(async () => {
   await resetDatabase();
+});
+
+describe('ticket-created Discord DM (via createTicketFromDiscord)', () => {
+  it('queues a DM with the claim link for a first-contact placeholder user', async () => {
+    const { ticket, path } = await createTicketFromDiscord(
+      {
+        title: 'Discord ticket',
+        description: 'help',
+        priority: 'normal',
+        type: 'other',
+        discordUserId: 'discord-created-1',
+        discordUsername: 'someuser',
+      },
+      BASE_URL,
+    );
+
+    const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id } });
+    expect(dms).toHaveLength(1);
+    expect(dms[0]?.kind).toBe('ticket_created');
+    expect(dms[0]?.discordUserId).toBe('discord-created-1');
+    expect(dms[0]?.message).toBe(`Your ticket has been created — view it here: ${BASE_URL}${path}`);
+  });
+
+  it('queues a DM with the direct token link for an already-linked user', async () => {
+    await createTestUser({ name: 'Linked', discordId: 'discord-created-2' });
+
+    const { ticket, path } = await createTicketFromDiscord(
+      {
+        title: 'Second ticket',
+        description: 'again',
+        priority: 'normal',
+        type: 'other',
+        discordUserId: 'discord-created-2',
+        discordUsername: 'someuser',
+      },
+      BASE_URL,
+    );
+
+    const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id } });
+    expect(dms).toHaveLength(1);
+    expect(dms[0]?.discordUserId).toBe('discord-created-2');
+    expect(dms[0]?.message).toBe(`Your ticket has been created — view it here: ${BASE_URL}${path}`);
+  });
 });
 
 describe('reply notifications (via addMessage)', () => {
@@ -76,6 +118,41 @@ describe('reply notifications (via addMessage)', () => {
 
     expect(await countUnreadNotifications(owner.id)).toBe(0);
   });
+
+  it('immediately queues a link-only Discord DM to the owner, never including the reply body', async () => {
+    const owner = await createTestUser({ name: 'Owner', discordId: 'discord-reply-1' });
+    const admin = await createTestUser({ name: 'Admin', email: 'admin-reply@test.local', role: 'admin' });
+    const ticket = await createTicket(owner.id, 'user', {
+      title: 'Printer jam',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    await addMessage(ticket.id, admin.id, { body: 'secret internal detail', isInternalNote: false });
+
+    const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id } });
+    expect(dms).toHaveLength(1);
+    expect(dms[0]?.kind).toBe('reply');
+    expect(dms[0]?.discordUserId).toBe('discord-reply-1');
+    expect(dms[0]?.message).toBe(`Your ticket has a new reply — view it here: ${env.publicAppUrl}/t/${ticket.id}`);
+    expect(dms[0]?.message).not.toContain('secret internal detail');
+  });
+
+  it('does not queue a Discord DM for a reply when the owner has no linked Discord account', async () => {
+    const owner = await createTestUser({ name: 'Owner' });
+    const admin = await createTestUser({ name: 'Admin', email: 'admin-reply2@test.local', role: 'admin' });
+    const ticket = await createTicket(owner.id, 'user', {
+      title: 'No discord link',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    await addMessage(ticket.id, admin.id, { body: 'looking into it', isInternalNote: false });
+
+    expect(await prisma.discordDm.count({ where: { ticketId: ticket.id } })).toBe(0);
+  });
 });
 
 describe('status-change notifications (via updateTicket)', () => {
@@ -111,6 +188,78 @@ describe('status-change notifications (via updateTicket)', () => {
 
     expect(await countUnreadNotifications(owner.id)).toBe(0);
   });
+
+  it('queues a "closed" Discord DM when the ticket is closed', async () => {
+    const owner = await createTestUser({ name: 'Owner', discordId: 'discord-closed-1' });
+    const admin = await createTestUser({ name: 'Admin', email: 'admin-closed@test.local', role: 'admin' });
+    const ticket = await createTicket(owner.id, 'user', {
+      title: 'Closed ticket',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    await updateTicket(ticket.id, { status: 'closed', closeReason: 'other' }, admin.id);
+
+    const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id, kind: 'closed' } });
+    expect(dms).toHaveLength(1);
+    expect(dms[0]?.message).toBe(
+      `Your ticket has been closed — view it here: ${env.publicAppUrl}/t/${ticket.id}`,
+    );
+  });
+
+  it('queues a "resolved" Discord DM when the ticket is resolved', async () => {
+    const owner = await createTestUser({ name: 'Owner', discordId: 'discord-resolved-1' });
+    const admin = await createTestUser({ name: 'Admin', email: 'admin-resolved@test.local', role: 'admin' });
+    const ticket = await createTicket(owner.id, 'user', {
+      title: 'Resolved ticket',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    await updateTicket(ticket.id, { status: 'resolved' }, admin.id);
+
+    const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id, kind: 'resolved' } });
+    expect(dms).toHaveLength(1);
+    expect(dms[0]?.message).toBe(
+      `Your ticket has been resolved — view it here: ${env.publicAppUrl}/t/${ticket.id}`,
+    );
+  });
+
+  it('queues a generic "updated" Discord DM for other status transitions', async () => {
+    const owner = await createTestUser({ name: 'Owner', discordId: 'discord-updated-1' });
+    const admin = await createTestUser({ name: 'Admin', email: 'admin-updated@test.local', role: 'admin' });
+    const ticket = await createTicket(owner.id, 'user', {
+      title: 'In progress ticket',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    await updateTicket(ticket.id, { status: 'in_progress' }, admin.id);
+
+    const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id, kind: 'status_updated' } });
+    expect(dms).toHaveLength(1);
+    expect(dms[0]?.message).toBe(
+      `Your ticket has been updated — view it here: ${env.publicAppUrl}/t/${ticket.id}`,
+    );
+  });
+
+  it('does not queue a Discord DM when the owner has no linked Discord account', async () => {
+    const owner = await createTestUser({ name: 'Owner' });
+    const admin = await createTestUser({ name: 'Admin', email: 'admin-nolink@test.local', role: 'admin' });
+    const ticket = await createTicket(owner.id, 'user', {
+      title: 'No discord link',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    await updateTicket(ticket.id, { status: 'resolved' }, admin.id);
+
+    expect(await prisma.discordDm.count({ where: { ticketId: ticket.id } })).toBe(0);
+  });
 });
 
 describe('pending-status Discord DM (via updateTicket)', () => {
@@ -134,7 +283,7 @@ describe('pending-status Discord DM (via updateTicket)', () => {
     expect(dms[0]?.kind).toBe('pending_notice');
     expect(dms[0]?.discordUserId).toBe('discord-owner-1');
     expect(dms[0]?.message).toBe(
-      `Your ticket "VPN down" is awaiting a response from you: ${env.publicAppUrl}/t/${ticket.id}`,
+      `Your ticket is awaiting additional information from you — please reply here: ${env.publicAppUrl}/t/${ticket.id}`,
     );
   });
 
@@ -177,14 +326,14 @@ describe('pending-status Discord DM (via updateTicket)', () => {
 });
 
 describe('queuePendingEscalationDms', () => {
-  async function makePendingTicket(daysAgo: number, discordId: string | null) {
+  async function makePendingTicket(hoursAgo: number, discordId: string | null) {
     const owner = await createTestUser({
-      name: `Owner ${daysAgo}d`,
-      email: `owner-${daysAgo}d-${Math.random().toString(36).slice(2)}@test.local`,
+      name: `Owner ${hoursAgo}h`,
+      email: `owner-${hoursAgo}h-${Math.random().toString(36).slice(2)}@test.local`,
       discordId: discordId ?? undefined,
     });
     const ticket = await createTicket(owner.id, 'user', {
-      title: `Pending ${daysAgo}d`,
+      title: `Pending ${hoursAgo}h`,
       description: 'x',
       priority: 'normal',
       type: 'other',
@@ -193,14 +342,14 @@ describe('queuePendingEscalationDms', () => {
       where: { id: ticket.id },
       data: {
         status: 'pending',
-        pendingSince: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000),
+        pendingSince: new Date(Date.now() - hoursAgo * 60 * 60 * 1000),
       },
     });
     return ticket;
   }
 
-  it('queues an escalation DM for tickets pending 3+ days with a linked owner, and stamps pendingEscalationSentAt', async () => {
-    const ticket = await makePendingTicket(4, 'discord-escalate-1');
+  it('queues an escalation DM for tickets pending 24+ hours with a linked owner, and stamps pendingEscalationSentAt', async () => {
+    const ticket = await makePendingTicket(25, 'discord-escalate-1');
 
     const queuedCount = await queuePendingEscalationDms(BASE_URL);
     expect(queuedCount).toBe(1);
@@ -208,14 +357,14 @@ describe('queuePendingEscalationDms', () => {
     const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id } });
     expect(dms).toHaveLength(1);
     expect(dms[0]?.kind).toBe('pending_escalation');
-    expect(dms[0]?.message).toContain('may close it');
+    expect(dms[0]?.message).toContain('may be closed');
 
     const updated = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
     expect(updated.pendingEscalationSentAt).not.toBeNull();
   });
 
   it('does not queue a second escalation DM once one has already been sent', async () => {
-    await makePendingTicket(4, 'discord-escalate-2');
+    await makePendingTicket(25, 'discord-escalate-2');
 
     const firstRun = await queuePendingEscalationDms(BASE_URL);
     expect(firstRun).toBe(1);
@@ -224,7 +373,7 @@ describe('queuePendingEscalationDms', () => {
     expect(secondRun).toBe(0);
   });
 
-  it('does not queue a DM for a ticket pending less than 3 days', async () => {
+  it('does not queue a DM for a ticket pending less than 24 hours', async () => {
     await makePendingTicket(1, 'discord-escalate-3');
 
     const queuedCount = await queuePendingEscalationDms(BASE_URL);
@@ -232,77 +381,10 @@ describe('queuePendingEscalationDms', () => {
   });
 
   it('skips tickets whose owner has no linked Discord account', async () => {
-    await makePendingTicket(4, null);
+    await makePendingTicket(25, null);
 
     const queuedCount = await queuePendingEscalationDms(BASE_URL);
     expect(queuedCount).toBe(0);
-  });
-});
-
-describe('queueUnreadReplyDms', () => {
-  async function makeReplyNotification(minutesAgo: number, discordId: string | null, isRead = false) {
-    const owner = await createTestUser({
-      name: `Owner ${minutesAgo}m`,
-      email: `owner-${minutesAgo}m-${Math.random().toString(36).slice(2)}@test.local`,
-      discordId: discordId ?? undefined,
-    });
-    const ticket = await createTicket(owner.id, 'user', {
-      title: `Reply ${minutesAgo}m`,
-      description: 'x',
-      priority: 'normal',
-      type: 'other',
-    });
-    const notification = await prisma.notification.create({
-      data: {
-        userId: owner.id,
-        ticketId: ticket.id,
-        type: 'reply',
-        message: `New reply on "${ticket.title}"`,
-        isRead,
-        createdAt: new Date(Date.now() - minutesAgo * 60 * 1000),
-      },
-    });
-    return { owner, ticket, notification };
-  }
-
-  it('queues a reminder DM for an unread reply left unread 30+ minutes, and marks the notification', async () => {
-    const { ticket, notification } = await makeReplyNotification(40, 'discord-reply-1');
-
-    const queuedCount = await queueUnreadReplyDms(BASE_URL);
-    expect(queuedCount).toBe(1);
-
-    const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id } });
-    expect(dms).toHaveLength(1);
-    expect(dms[0]?.kind).toBe('reply_reminder');
-    expect(dms[0]?.message).toBe(`You have a reply to ticket "${ticket.title}": ${BASE_URL}/t/${ticket.id}`);
-
-    const updatedNotification = await prisma.notification.findUniqueOrThrow({ where: { id: notification.id } });
-    expect(updatedNotification.discordReminderSentAt).not.toBeNull();
-  });
-
-  it('does not queue a reminder for a reply younger than 30 minutes', async () => {
-    await makeReplyNotification(10, 'discord-reply-2');
-
-    expect(await queueUnreadReplyDms(BASE_URL)).toBe(0);
-  });
-
-  it('does not queue a reminder for a reply that has already been read', async () => {
-    await makeReplyNotification(40, 'discord-reply-3', true);
-
-    expect(await queueUnreadReplyDms(BASE_URL)).toBe(0);
-  });
-
-  it('does not queue a second reminder for the same notification', async () => {
-    await makeReplyNotification(40, 'discord-reply-4');
-
-    expect(await queueUnreadReplyDms(BASE_URL)).toBe(1);
-    expect(await queueUnreadReplyDms(BASE_URL)).toBe(0);
-  });
-
-  it('skips users with no linked Discord account', async () => {
-    await makeReplyNotification(40, null);
-
-    expect(await queueUnreadReplyDms(BASE_URL)).toBe(0);
   });
 });
 
@@ -321,7 +403,7 @@ describe('Discord DM queue plumbing', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 5));
     const second = await prisma.discordDm.create({
-      data: { discordUserId: 'discord-queue-1', ticketId: ticket.id, kind: 'reply_reminder', message: 'second' },
+      data: { discordUserId: 'discord-queue-1', ticketId: ticket.id, kind: 'reply', message: 'second' },
     });
 
     const pending = await listPendingDiscordDms();

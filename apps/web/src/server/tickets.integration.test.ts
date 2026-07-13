@@ -13,6 +13,8 @@ import {
   verifyTicketToken,
 } from './tickets';
 
+const BASE_URL = 'https://tickets.test';
+
 beforeEach(async () => {
   await resetDatabase();
 });
@@ -109,7 +111,7 @@ describe('createTicketFromDiscord', () => {
       type: 'other',
       discordUserId: 'discord-123',
       discordUsername: 'someuser',
-    });
+    }, BASE_URL);
 
     expect(isNewUser).toBe(true);
     expect(path).toContain('/link-discord/claim?token=');
@@ -129,7 +131,7 @@ describe('createTicketFromDiscord', () => {
       type: 'other',
       discordUserId: 'discord-456',
       discordUsername: 'someuser',
-    });
+    }, BASE_URL);
 
     expect(isNewUser).toBe(false);
     expect(ticket.createdById).toBe(existing.id);
@@ -148,7 +150,7 @@ describe('createTicketFromDiscord', () => {
       type: 'other',
       discordUserId: first.discordId!,
       discordUsername: 'a',
-    });
+    }, BASE_URL);
     const ticketB = await createTicketFromDiscord({
       title: 'Ticket B',
       description: 'b',
@@ -156,7 +158,7 @@ describe('createTicketFromDiscord', () => {
       type: 'other',
       discordUserId: second.discordId!,
       discordUsername: 'b',
-    });
+    }, BASE_URL);
 
     const tokenA = tokenFromPath(ticketA.path);
     expect(await verifyTicketToken(ticketB.ticket.id, tokenA)).toBe(false);
@@ -171,7 +173,7 @@ describe('createTicketFromDiscord', () => {
       type: 'other',
       discordUserId: existing.discordId!,
       discordUsername: 'x',
-    });
+    }, BASE_URL);
 
     await prisma.ticketAccessToken.updateMany({
       where: { ticketId: ticket.id },
@@ -189,7 +191,7 @@ describe('createTicketFromDiscord', () => {
       type: 'other',
       discordUserId: 'discord-repeat',
       discordUsername: 'repeat',
-    });
+    }, BASE_URL);
     const second = await createTicketFromDiscord({
       title: 'Second',
       description: 'y',
@@ -197,7 +199,7 @@ describe('createTicketFromDiscord', () => {
       type: 'other',
       discordUserId: 'discord-repeat',
       discordUsername: 'repeat',
-    });
+    }, BASE_URL);
 
     expect(second.ticket.createdById).toBe(first.ticket.createdById);
     expect(second.path).not.toBe(first.path);
@@ -218,7 +220,7 @@ describe('claimDiscordAccount', () => {
       type: 'other',
       discordUserId: 'discord-claim-1',
       discordUsername: 'someuser',
-    });
+    }, BASE_URL);
     const placeholderId = ticket.createdById;
 
     const result = await claimDiscordAccount(tokenFromPath(path), realUser.id);
@@ -243,7 +245,7 @@ describe('claimDiscordAccount', () => {
       type: 'other',
       discordUserId: 'discord-claim-2',
       discordUsername: 'someuser',
-    });
+    }, BASE_URL);
 
     await prisma.discordClaim.updateMany({ data: { expiresAt: new Date(Date.now() - 1000) } });
 
@@ -263,7 +265,7 @@ describe('claimDiscordAccount', () => {
       type: 'other',
       discordUserId: 'discord-claim-3',
       discordUsername: 'someuser',
-    });
+    }, BASE_URL);
 
     await expect(claimDiscordAccount(tokenFromPath(path), realUser.id)).rejects.toThrow(
       'already linked to a different Discord user',

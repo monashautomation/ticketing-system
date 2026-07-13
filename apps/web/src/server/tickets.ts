@@ -10,7 +10,12 @@ import {
   type UpdateTicketInput,
 } from '@ticketing/shared';
 import { AppError, NotFoundError } from '@/lib/errors';
-import { handlePendingTransition, notifyReply, notifyStatusChanged } from '@/server/notifications';
+import {
+  handlePendingTransition,
+  notifyReply,
+  notifyStatusChanged,
+  notifyTicketCreated,
+} from '@/server/notifications';
 import { publishTicketMessage } from '@/server/ticket-events';
 
 const TICKET_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
@@ -176,7 +181,7 @@ export async function createTicket(
  * sign in with Authentik, silently attaches their discordId to their real account (see
  * claimDiscordAccount). Already-linked users get a direct token URL -- no login required.
  */
-export async function createTicketFromDiscord(input: CreateInternalTicketInput) {
+export async function createTicketFromDiscord(input: CreateInternalTicketInput, baseUrl: string) {
   const existingUser = await prisma.user.findUnique({ where: { discordId: input.discordUserId } });
 
   const owner =
@@ -219,9 +224,12 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput) 
       },
     });
 
+    const claimPath = `/link-discord/claim?token=${rawClaimToken}`;
+    await notifyTicketCreated({ id: ticket.id, createdBy: owner }, `${baseUrl}${claimPath}`);
+
     return {
       ticket,
-      path: `/link-discord/claim?token=${rawClaimToken}`,
+      path: claimPath,
       isNewUser: !existingUser,
     };
   }
@@ -235,9 +243,12 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput) 
     },
   });
 
+  const tokenPath = `/t/${ticket.id}?token=${rawToken}`;
+  await notifyTicketCreated({ id: ticket.id, createdBy: owner }, `${baseUrl}${tokenPath}`);
+
   return {
     ticket,
-    path: `/t/${ticket.id}?token=${rawToken}`,
+    path: tokenPath,
     isNewUser: !existingUser,
   };
 }
@@ -333,12 +344,15 @@ export async function addMessage(ticketId: string, authorId: string, input: Crea
   const ticket = await prisma.ticket.update({
     where: { id: ticketId },
     data: { updatedAt: new Date() },
-    include: { watchers: true, assignees: true },
+    include: { watchers: true, assignees: true, createdBy: true },
   });
 
   // Internal notes are admin-only, so the ticket owner/watchers must never be notified of them.
   if (!input.isInternalNote) {
-    await notifyReply(ticket, authorId);
+    // Deferred import: keeps env.ts's required-var validation out of the module load path for
+    // pure-function unit tests that never call addMessage.
+    const { env } = await import('@/lib/env');
+    await notifyReply(ticket, authorId, env.publicAppUrl);
   }
 
   return message;
@@ -437,10 +451,10 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
       });
       publishTicketMessage({ ticketId, messageId: systemMessage.id });
     }
-    await notifyStatusChanged(ticket, input.status, actorId);
     // Deferred import: keeps env.ts's required-var validation out of the module load path for
     // pure-function unit tests (canViewTicket, isOverdue) that never call updateTicket.
     const { env } = await import('@/lib/env');
+    await notifyStatusChanged(ticket, input.status, actorId, env.publicAppUrl);
     await handlePendingTransition(ticket, previous.status, env.publicAppUrl);
   }
 
