@@ -1,6 +1,5 @@
 const CLEANUP_INTERVAL_MS = 1000 * 60 * 60 * 24;
 const PENDING_ESCALATION_CHECK_INTERVAL_MS = 1000 * 60 * 60; // hourly
-const UNREAD_REPLY_CHECK_INTERVAL_MS = 1000 * 60 * 5; // every 5 minutes
 
 /**
  * Runs once per server process on boot (Next.js instrumentation hook). Single-process
@@ -12,7 +11,7 @@ export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
   const { cleanupExpiredAttachments } = await import('@/server/attachments');
-  const { queuePendingEscalationDms, queueUnreadReplyDms } = await import('@/server/notifications');
+  const { queuePendingEscalationDms } = await import('@/server/notifications');
   const { env } = await import('@/lib/env');
   const { logger } = await import('@/lib/logger');
 
@@ -32,18 +31,8 @@ export async function register(): Promise<void> {
     }
   }
 
-  async function runUnreadReplyCheck(): Promise<void> {
-    try {
-      await queueUnreadReplyDms(env.publicAppUrl);
-    } catch (error) {
-      logger.error('Unread-reply DM sweep failed', error);
-    }
-  }
-
   void runCleanup();
   void runPendingEscalationCheck();
-  void runUnreadReplyCheck();
   setInterval(() => void runCleanup(), CLEANUP_INTERVAL_MS);
   setInterval(() => void runPendingEscalationCheck(), PENDING_ESCALATION_CHECK_INTERVAL_MS);
-  setInterval(() => void runUnreadReplyCheck(), UNREAD_REPLY_CHECK_INTERVAL_MS);
 }

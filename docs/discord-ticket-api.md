@@ -64,9 +64,9 @@ Backend looks up `User` by `discordId`:
 - **Unknown user**: creates a placeholder `User` (`isDiscordPlaceholder: true`, `discordId` stored, `name` = `discordUsername`), a `DiscordClaim` (30-min TTL) tied to that placeholder and the new ticket, and returns
   `url = ${PUBLIC_APP_URL}/link-discord/claim?token={claimToken}` — silent identifier link. When the user later signs in via Authentik and opens that link, the app links their real account to the placeholder (merging `discordId`/`discordUsername`), and they land on the ticket.
 
-Bot just sends the returned `url` to the user — no need to know which case occurred, though `isNewUser` is available if useful for messaging ("welcome, first time you've opened a ticket" etc).
+This app queues its own "your ticket has been created" DM to `discordUserId` with the returned `url` — the caller does not need to send anything itself. `isNewUser` is returned in case it's useful for other messaging ("welcome, first time you've opened a ticket" etc), but is not required.
 
-`discordUserId` is persisted on `User.discordId` for backend DM use later; `discordUsername` is stored as `User.name` for UI display.
+`discordUserId` is persisted on `User.discordId` and used for all future DMs on this ticket (replies, status changes, etc).
 
 ## Example (bot-side)
 

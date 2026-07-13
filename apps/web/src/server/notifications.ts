@@ -1,7 +1,7 @@
 import { prisma } from '@ticketing/db';
+import type { TicketStatus } from '@ticketing/shared';
 
-const UNREAD_REPLY_DM_DELAY_MS = 1000 * 60 * 30; // 30 minutes
-const PENDING_ESCALATION_MS = 1000 * 60 * 60 * 24 * 3; // 3 days
+const PENDING_ESCALATION_MS = 1000 * 60 * 60 * 24; // 24 hours
 
 export async function listNotificationsForUser(userId: string, limit = 30) {
   return prisma.notification.findMany({
@@ -38,34 +38,95 @@ export async function markTicketNotificationsRead(ticketId: string, userId: stri
   });
 }
 
-function ticketRecipientIds(ticket: {
-  createdById: string;
-  watchers: { id: string }[];
-  assignees: { id: string }[];
-}): string[] {
-  const ids = new Set([ticket.createdById, ...ticket.watchers.map((w) => w.id)]);
-  return [...ids];
+interface RecipientUser {
+  id: string;
+  discordId: string | null;
+}
+
+interface TicketForNotify {
+  id: string;
+  title: string;
+  createdBy: RecipientUser;
+  watchers: RecipientUser[];
+}
+
+/** Everyone with a stake in the ticket (owner + watchers), deduped by id. */
+function ticketRecipients(ticket: TicketForNotify): RecipientUser[] {
+  const byId = new Map<string, RecipientUser>();
+  byId.set(ticket.createdBy.id, ticket.createdBy);
+  for (const watcher of ticket.watchers) byId.set(watcher.id, watcher);
+  return [...byId.values()];
+}
+
+function ticketLink(baseUrl: string, ticketId: string): string {
+  return `${baseUrl}/t/${ticketId}`;
+}
+
+/** Queues a Discord DM for every recipient that has a linked Discord account. */
+async function queueDiscordDms(
+  ticketId: string,
+  recipients: RecipientUser[],
+  kind: 'ticket_created' | 'reply' | 'status_updated' | 'closed' | 'resolved' | 'pending_notice' | 'pending_escalation',
+  message: string,
+): Promise<void> {
+  const withDiscord = recipients.filter((r): r is RecipientUser & { discordId: string } => r.discordId !== null);
+  if (withDiscord.length === 0) return;
+
+  await prisma.discordDm.createMany({
+    data: withDiscord.map((r) => ({
+      discordUserId: r.discordId,
+      ticketId,
+      kind,
+      message,
+    })),
+  });
+}
+
+/**
+ * Queues the "your ticket has been created" DM. Called from the ticket-created API flow.
+ * `link` is caller-supplied rather than derived from `ticket.id` because a first-contact
+ * placeholder user only has a claim link, not a direct `/t/{id}` link, to view the ticket.
+ */
+export async function notifyTicketCreated(
+  ticket: { id: string; createdBy: RecipientUser },
+  link: string,
+): Promise<void> {
+  await queueDiscordDms(
+    ticket.id,
+    [ticket.createdBy],
+    'ticket_created',
+    `Your ticket has been created — view it here: ${link}`,
+  );
 }
 
 /** Notifies everyone with a stake in the ticket (owner + watchers) except the actor who caused the event. */
 export async function notifyReply(
-  ticket: { id: string; title: string; createdById: string; watchers: { id: string }[]; assignees: { id: string }[] },
+  ticket: TicketForNotify,
   authorId: string,
+  baseUrl: string,
 ): Promise<void> {
-  const recipientIds = ticketRecipientIds(ticket).filter((id) => id !== authorId);
-  if (recipientIds.length === 0) return;
+  const recipients = ticketRecipients(ticket).filter((r) => r.id !== authorId);
+  if (recipients.length === 0) return;
 
   await prisma.notification.createMany({
-    data: recipientIds.map((userId) => ({
-      userId,
+    data: recipients.map((r) => ({
+      userId: r.id,
       ticketId: ticket.id,
       type: 'reply' as const,
       message: `New reply on "${ticket.title}"`,
     })),
   });
+
+  // Never include the reply body or ticket details in the DM -- link only.
+  await queueDiscordDms(
+    ticket.id,
+    recipients,
+    'reply',
+    `Your ticket has a new reply — view it here: ${ticketLink(baseUrl, ticket.id)}`,
+  );
 }
 
-const STATUS_MESSAGES: Partial<Record<string, string>> = {
+const STATUS_LABELS: Partial<Record<TicketStatus, string>> = {
   pending: 'is awaiting your response',
   resolved: 'has been resolved',
   closed: 'has been closed',
@@ -73,29 +134,45 @@ const STATUS_MESSAGES: Partial<Record<string, string>> = {
   escalated: 'has been escalated',
 };
 
-export async function notifyStatusChanged(
-  ticket: { id: string; title: string; createdById: string; watchers: { id: string }[]; assignees: { id: string }[] },
-  newStatus: string,
-  actorId: string,
-): Promise<void> {
-  const label = STATUS_MESSAGES[newStatus];
-  if (!label) return;
-
-  const recipientIds = ticketRecipientIds(ticket).filter((id) => id !== actorId);
-  if (recipientIds.length === 0) return;
-
-  await prisma.notification.createMany({
-    data: recipientIds.map((userId) => ({
-      userId,
-      ticketId: ticket.id,
-      type: 'status_changed' as const,
-      message: `Your ticket "${ticket.title}" ${label}`,
-    })),
-  });
+/**
+ * `pending` gets its own DM from handlePendingTransition (with the "please reply" wording), so
+ * it's skipped here to avoid double-sending. `closed`/`resolved` get tailored wording; every
+ * other status gets a generic "has been updated" DM.
+ */
+function statusDmMessage(status: TicketStatus, baseUrl: string, ticketId: string): string | null {
+  const link = ticketLink(baseUrl, ticketId);
+  if (status === 'pending') return null;
+  if (status === 'closed') return `Your ticket has been closed — view it here: ${link}`;
+  if (status === 'resolved') return `Your ticket has been resolved — view it here: ${link}`;
+  return `Your ticket has been updated — view it here: ${link}`;
 }
 
-function ticketLink(baseUrl: string, ticketId: string): string {
-  return `${baseUrl}/t/${ticketId}`;
+export async function notifyStatusChanged(
+  ticket: TicketForNotify,
+  newStatus: TicketStatus,
+  actorId: string,
+  baseUrl: string,
+): Promise<void> {
+  const label = STATUS_LABELS[newStatus];
+  const recipients = ticketRecipients(ticket).filter((r) => r.id !== actorId);
+  if (recipients.length === 0) return;
+
+  if (label) {
+    await prisma.notification.createMany({
+      data: recipients.map((r) => ({
+        userId: r.id,
+        ticketId: ticket.id,
+        type: 'status_changed' as const,
+        message: `Your ticket "${ticket.title}" ${label}`,
+      })),
+    });
+  }
+
+  const dmMessage = statusDmMessage(newStatus, baseUrl, ticket.id);
+  if (!dmMessage) return;
+
+  const kind = newStatus === 'closed' ? 'closed' : newStatus === 'resolved' ? 'resolved' : 'status_updated';
+  await queueDiscordDms(ticket.id, recipients, kind, dmMessage);
 }
 
 /**
@@ -104,8 +181,8 @@ function ticketLink(baseUrl: string, ticketId: string): string {
  * updateTicket right after the status write, passing the ticket's state *before* the update.
  */
 export async function handlePendingTransition(
-  ticket: { id: string; title: string; status: string; createdBy: { discordId: string | null } },
-  previousStatus: string,
+  ticket: { id: string; status: TicketStatus; createdBy: RecipientUser },
+  previousStatus: TicketStatus,
   baseUrl: string,
 ): Promise<void> {
   const enteringPending = ticket.status === 'pending' && previousStatus !== 'pending';
@@ -126,19 +203,15 @@ export async function handlePendingTransition(
     data: { pendingSince: new Date(), pendingEscalationSentAt: null },
   });
 
-  if (!ticket.createdBy.discordId) return;
-
-  await prisma.discordDm.create({
-    data: {
-      discordUserId: ticket.createdBy.discordId,
-      ticketId: ticket.id,
-      kind: 'pending_notice',
-      message: `Your ticket "${ticket.title}" is awaiting a response from you: ${ticketLink(baseUrl, ticket.id)}`,
-    },
-  });
+  await queueDiscordDms(
+    ticket.id,
+    [ticket.createdBy],
+    'pending_notice',
+    `Your ticket is awaiting additional information from you — please reply here: ${ticketLink(baseUrl, ticket.id)}`,
+  );
 }
 
-/** Background sweep: tickets stuck in `pending` for 3+ days get a single escalation-warning DM. */
+/** Background sweep: tickets stuck in `pending` for 24+ hours get a single follow-up DM. */
 export async function queuePendingEscalationDms(baseUrl: string): Promise<number> {
   const cutoff = new Date(Date.now() - PENDING_ESCALATION_MS);
   const tickets = await prisma.ticket.findMany({
@@ -159,52 +232,13 @@ export async function queuePendingEscalationDms(baseUrl: string): Promise<number
         discordUserId: t.createdBy.discordId as string,
         ticketId: t.id,
         kind: 'pending_escalation' as const,
-        message: `Your ticket "${t.title}" is still awaiting your response. Sys & Infra may close it if there's no response within a reasonable time: ${ticketLink(baseUrl, t.id)}`,
+        message: `Your ticket is still awaiting a response and may be closed if we don't hear back soon — please reply here: ${ticketLink(baseUrl, t.id)}`,
       })),
     }),
     prisma.ticket.updateMany({
       where: { id: { in: withDiscord.map((t) => t.id) } },
       data: { pendingEscalationSentAt: new Date() },
     }),
-  ]);
-
-  return withDiscord.length;
-}
-
-/** Background sweep: reply notifications left unread for 30+ minutes get a reminder DM. */
-export async function queueUnreadReplyDms(baseUrl: string): Promise<number> {
-  const cutoff = new Date(Date.now() - UNREAD_REPLY_DM_DELAY_MS);
-  const notifications = await prisma.notification.findMany({
-    where: {
-      type: 'reply',
-      isRead: false,
-      discordReminderSentAt: null,
-      createdAt: { lt: cutoff },
-    },
-    include: {
-      ticket: { select: { id: true, title: true } },
-      user: { select: { discordId: true } },
-    },
-  });
-
-  const withDiscord = notifications.filter((n) => n.user.discordId);
-  if (withDiscord.length === 0) return 0;
-
-  await prisma.$transaction([
-    prisma.discordDm.createMany({
-      data: withDiscord.map((n) => ({
-        discordUserId: n.user.discordId as string,
-        ticketId: n.ticket.id,
-        kind: 'reply_reminder' as const,
-        message: `You have a reply to ticket "${n.ticket.title}": ${ticketLink(baseUrl, n.ticket.id)}`,
-      })),
-    }),
-    ...withDiscord.map((n) =>
-      prisma.notification.update({
-        where: { id: n.id },
-        data: { discordReminderSentAt: new Date() },
-      }),
-    ),
   ]);
 
   return withDiscord.length;
