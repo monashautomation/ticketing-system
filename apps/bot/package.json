@@ -7,12 +7,10 @@
     "dev": "tsx --env-file=.env watch src/index.ts",
     "build": "tsc --noEmit",
     "start": "tsx --env-file=.env src/index.ts",
-    "register": "tsx --env-file=.env src/register-commands.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ticketing/shared": "workspace:*",
-    "discord.js": "^14.16.3"
+    "@ticketing/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -5,7 +5,7 @@ metadata:
   labels:
     app: ticketing-bot
 spec:
-  replicas: 1 # Discord gateway session — do not scale horizontally without sharding
+  replicas: 1
   selector:
     matchLabels:
       app: ticketing-bot

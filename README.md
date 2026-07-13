@@ -43,7 +43,7 @@ pnpm monorepo:
 
 ```
 apps/web      Next.js app — UI, API routes, BetterAuth, Prisma access
-apps/bot      discord.js service — slash commands, calls web's internal API
+apps/bot      background service — syncs Authentik directory, sends Discord DMs via external bot API
 packages/db   Prisma schema + generated client, shared by web (bot only calls the API)
 packages/shared  zod schemas + types shared between web and bot
 deploy/       kustomize base + prod overlay for k8s
@@ -59,7 +59,9 @@ keeps one write path into the database.
 - Node 20+, [pnpm](https://pnpm.io) (`npm install -g pnpm` if you don't have it)
 - Docker + Docker Compose (for local Postgres / full-stack run)
 - An Authentik instance with an OIDC application configured for this app
-- A Discord application + bot token ([Discord Developer Portal](https://discord.com/developers/applications))
+- A key for the external Discord bot HTTP API (`DISCORD_DM_API_KEY`) — a separate system owns
+  the Discord gateway connection (slash commands, receiving messages) and calls this app's
+  `/api/internal/*` routes; this app only calls back out to send DMs
 - An S3-compatible bucket for ticket attachments (AWS S3, or self-hosted
   [minio](https://min.io) — the local Docker Compose stack runs minio for you)
 
@@ -79,14 +81,11 @@ keeps one write path into the database.
 
 ## Configuring Discord
 
-1. Create an application at the Discord Developer Portal, add a **Bot**, copy
-   its token → `DISCORD_TOKEN`, and the application's client ID → `DISCORD_CLIENT_ID`.
-2. Invite the bot to your server with the `applications.commands` and `bot`
-   scopes (minimum permission: Send Messages).
-3. Set `DISCORD_DEV_GUILD_ID` to your test server's ID while developing —
-   guild-scoped slash commands register instantly. Leave it blank for global
-   commands in production (propagation can take up to an hour).
-4. Register the slash commands (`/ticket`, `/link`) — see [Running locally](#running-locally).
+Slash commands and the Discord gateway connection live in a separate system —
+this repo doesn't register or handle them. That system calls this app's
+`POST /api/internal/tickets` (see `docs/discord-ticket-api.md`) to create
+tickets, and `apps/bot` calls the external Discord bot HTTP API
+(`DISCORD_DM_API_KEY`) to send DMs back to users.
 
 ## Environment variables
 
@@ -105,8 +104,6 @@ and fill in real values. Per-app `.env.example` files exist too, for running
 | `ADMIN_GROUPS` | web | Comma-separated Authentik group names → admin role |
 | `INTERNAL_API_SECRET` | web, bot | Shared secret between bot and web's internal API |
 | `UPTIME_KUMA_WEBHOOK_SECRET` | web | Sent as `?secret=` query param on the Kuma webhook URL |
-| `DISCORD_TOKEN` / `DISCORD_CLIENT_ID` | bot | From the Discord application |
-| `DISCORD_DEV_GUILD_ID` | bot | Optional, guild-scoped commands for dev |
 | `DISCORD_DM_API_KEY` | bot | Bearer key for the external Discord bot HTTP API used to send DMs |
 | `DISCORD_DM_API_URL` | bot | Optional, defaults to `https://discordbot.monashautomation.com` |
 | `S3_ENDPOINT` | web | Must be reachable from the **browser** — presigned upload/download URLs are handed to the client directly, not proxied |
@@ -144,15 +141,6 @@ DATABASE_URL=postgresql://ticketing:ticketing@localhost:5432/ticketing?schema=pu
 
 pnpm dev:web   # apps/web, http://localhost:3000, hot reload
 pnpm dev:bot   # apps/bot, separate terminal, hot reload via tsx watch
-```
-
-### Discord commands (either option)
-
-Register slash commands once (needs `DISCORD_TOKEN`/`DISCORD_CLIENT_ID` set,
-and `DISCORD_DEV_GUILD_ID` set to your test server for instant registration):
-
-```bash
-pnpm --filter bot register
 ```
 
 ### Testing
@@ -205,10 +193,6 @@ Deployments, so the schema is always migrated ahead of the new pods starting.
    — same credentials in both Secrets. A `PostSync` Job
    (`ticketing-minio-init`) creates the bucket automatically on first sync.
 3. `kubectl apply -f argocd/application.yaml`
-4. Register Discord slash commands globally: run `pnpm --filter bot register`
-   once with prod's `DISCORD_TOKEN`/`DISCORD_CLIENT_ID` and
-   `DISCORD_DEV_GUILD_ID` unset (global registration, takes up to ~1h to
-   propagate).
 
 **Ongoing deploys are automatic:** CI (`.github/workflows/ci.yml`) builds and
 pushes all three images on every merge to `main`, bumps the overlay's image
