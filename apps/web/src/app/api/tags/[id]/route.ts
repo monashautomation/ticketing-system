@@ -9,9 +9,9 @@ interface RouteParams {
 
 export async function DELETE(_request: Request, { params }: RouteParams) {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     const { id } = await params;
-    await deleteTag(id);
+    await deleteTag(id, session.user.id);
     return NextResponse.json({ success: true, data: null });
   } catch (error) {
     return handleApiError(error);

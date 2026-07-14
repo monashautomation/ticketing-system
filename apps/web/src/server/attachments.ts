@@ -2,6 +2,7 @@ import { prisma } from '@ticketing/db';
 import type { RequestUploadInput } from '@ticketing/shared';
 import { ForbiddenError, NotFoundError } from '@/lib/errors';
 import { buildAttachmentKey, deleteObject, getDownloadUrl, getUploadUrl } from '@/lib/storage';
+import { writeAuditLog } from '@/server/audit';
 
 const ATTACHMENT_RETENTION_MS = 1000 * 60 * 60 * 24 * 30;
 
@@ -45,6 +46,11 @@ export async function deleteAttachment(
   }
   await deleteObject(attachment.storageKey);
   await prisma.ticketAttachment.delete({ where: { id: attachmentId } });
+
+  await writeAuditLog(actor.id, 'attachment.delete', 'TicketAttachment', attachmentId, {
+    ticketId: attachment.ticketId,
+    fileName: attachment.fileName,
+  });
 }
 
 /** Deletes attachments on tickets that have been resolved/closed for 30+ days. */
