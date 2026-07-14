@@ -2,11 +2,16 @@ import { randomBytes, createHash } from 'node:crypto';
 import { prisma, Prisma } from '@ticketing/db';
 import {
   CLOSE_REASON_LABELS,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  TICKET_TYPES,
   type CreateInternalTicketInput,
   type CreateMessageInput,
   type CreateTicketInput,
+  type SearchToken,
   type TicketPriority,
   type TicketStatus,
+  type TicketType,
   type UpdateTicketInput,
 } from '@ticketing/shared';
 import { AppError, NotFoundError } from '@/lib/errors';
@@ -33,10 +38,20 @@ export function isOverdue(ticket: { slaDueAt: Date | null; status: string }): bo
 export interface TicketQueueFilters {
   status?: TicketStatus;
   priority?: TicketPriority;
-  assigneeId?: string;
-  tagId?: string;
+  type?: TicketType;
+  /** Array form supports multiple `assigned:`/`tag:` search tokens (OR'd together). */
+  assigneeId?: string | string[];
+  tagId?: string | string[];
+  createdById?: string[];
+  watcherId?: string[];
   overdueOnly?: boolean;
+  /** Free text matched against title/description/message bodies/OCR'd attachment text. */
   search?: string;
+}
+
+function toArray<T>(value: T | T[] | undefined): T[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 const ACTIVE_STATUS_GROUPS: readonly TicketStatus[] = ['open', 'escalated', 'pending', 'in_progress'];
@@ -82,21 +97,137 @@ export async function listTicketsForAdminQueue(filters: TicketQueueFilters = {})
   const where: Prisma.TicketWhereInput = {};
   if (filters.status) where.status = filters.status;
   if (filters.priority) where.priority = filters.priority;
-  if (filters.assigneeId) where.assignees = { some: { id: filters.assigneeId } };
-  if (filters.tagId) where.tags = { some: { id: filters.tagId } };
-  if (filters.search) {
-    where.title = { contains: filters.search, mode: 'insensitive' };
+  if (filters.type) where.type = filters.type;
+
+  const assigneeIds = toArray(filters.assigneeId);
+  if (assigneeIds.length > 0) where.assignees = { some: { id: { in: assigneeIds } } };
+
+  const tagIds = toArray(filters.tagId);
+  if (tagIds.length > 0) where.tags = { some: { id: { in: tagIds } } };
+
+  if (filters.createdById && filters.createdById.length > 0) {
+    where.createdById = { in: filters.createdById };
   }
+  if (filters.watcherId && filters.watcherId.length > 0) {
+    where.watchers = { some: { id: { in: filters.watcherId } } };
+  }
+
   if (filters.overdueOnly) {
     where.slaDueAt = { lt: new Date() };
     where.status = { notIn: [...RESOLVED_STATUSES] };
   }
 
-  return prisma.ticket.findMany({
+  // Free text is matched via the search_vector column (title/description/message bodies/OCR'd
+  // attachment text, maintained by Postgres triggers -- see the tickets_search_vector migration)
+  // rather than a Prisma `where` clause, since ts_rank ordering has to win over updatedAt.
+  let rankedIds: string[] | null = null;
+  if (filters.search) {
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "tickets"
+      WHERE "searchVector" @@ websearch_to_tsquery('english', ${filters.search})
+      ORDER BY ts_rank("searchVector", websearch_to_tsquery('english', ${filters.search})) DESC
+    `;
+    rankedIds = rows.map((r) => r.id);
+    if (rankedIds.length === 0) return [];
+    where.id = { in: rankedIds };
+  }
+
+  const tickets = await prisma.ticket.findMany({
     where,
-    orderBy: { updatedAt: 'desc' },
+    orderBy: rankedIds ? undefined : { updatedAt: 'desc' },
     include: { createdBy: true, assignees: true, tags: true, watchers: true },
   });
+
+  if (!rankedIds) return tickets;
+
+  const rank = new Map(rankedIds.map((id, index) => [id, index]));
+  return [...tickets].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+}
+
+/** Resolves a `submitter:`/`cced:` token value (name or email substring) to matching user ids. */
+async function resolveUserIdsBySubstring(query: string): Promise<string[]> {
+  const matches = await prisma.user.findMany({
+    where: {
+      OR: [
+        { name: { contains: query, mode: 'insensitive' } },
+        { email: { contains: query, mode: 'insensitive' } },
+      ],
+    },
+    select: { id: true },
+  });
+  return matches.map((u) => u.id);
+}
+
+/** Resolves an `assigned:` token value to matching admin user ids (assignees are always admins). */
+async function resolveAssigneeIdsBySubstring(query: string): Promise<string[]> {
+  const matches = await prisma.user.findMany({
+    where: { role: 'admin', name: { contains: query, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  return matches.map((u) => u.id);
+}
+
+/** Resolves a `tag:` token value to matching tag ids. */
+async function resolveTagIdsByName(query: string): Promise<string[]> {
+  const matches = await prisma.tag.findMany({
+    where: { name: { contains: query, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  return matches.map((t) => t.id);
+}
+
+/**
+ * Converts parsed `key:value` search tokens (see `parseSearchQuery` in @ticketing/shared) into
+ * `TicketQueueFilters`, resolving name-ish tokens (submitter/cced/assigned/tag) to real ids.
+ * Multiple tokens of the same type accumulate (OR'd via the `some.id.in` clauses above);
+ * `status`/`priority`/`type` tokens must exactly match a known value or are silently ignored.
+ */
+export async function resolveSearchTokensToFilters(
+  tokens: SearchToken[],
+): Promise<Partial<TicketQueueFilters>> {
+  const filters: Partial<TicketQueueFilters> = {};
+
+  for (const token of tokens) {
+    switch (token.type) {
+      case 'submitter': {
+        const ids = await resolveUserIdsBySubstring(token.value);
+        filters.createdById = [...(filters.createdById ?? []), ...ids];
+        break;
+      }
+      case 'cced': {
+        const ids = await resolveUserIdsBySubstring(token.value);
+        filters.watcherId = [...(filters.watcherId ?? []), ...ids];
+        break;
+      }
+      case 'assigned': {
+        const ids = await resolveAssigneeIdsBySubstring(token.value);
+        filters.assigneeId = [...toArray(filters.assigneeId), ...ids];
+        break;
+      }
+      case 'tag': {
+        const ids = await resolveTagIdsByName(token.value);
+        filters.tagId = [...toArray(filters.tagId), ...ids];
+        break;
+      }
+      case 'status':
+        if ((TICKET_STATUSES as readonly string[]).includes(token.value)) {
+          filters.status = token.value as TicketStatus;
+        }
+        break;
+      case 'priority':
+        if ((TICKET_PRIORITIES as readonly string[]).includes(token.value)) {
+          filters.priority = token.value as TicketPriority;
+        }
+        break;
+      case 'type':
+        if ((TICKET_TYPES as readonly string[]).includes(token.value)) {
+          filters.type = token.value as TicketType;
+        }
+        break;
+    }
+  }
+
+  return filters;
 }
 
 export async function getTicketOr404(ticketId: string) {
