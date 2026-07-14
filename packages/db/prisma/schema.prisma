@@ -52,6 +52,7 @@ enum MaintenanceSource {
 enum NotificationType {
   reply
   status_changed
+  sla_breach
 }
 
 enum DiscordDmKind {
@@ -63,6 +64,7 @@ enum DiscordDmKind {
   status_updated
   closed
   resolved
+  sla_breach
 }
 
 /// BetterAuth-managed user table. id/email/emailVerified/name/image/createdAt/updatedAt
@@ -163,6 +165,9 @@ model Ticket {
   /// 24-hour escalation reminder DM and dedupes the initial "awaiting your response" DM.
   pendingSince           DateTime?
   pendingEscalationSentAt DateTime?
+  /// Set once the SLA-breach alert DM/notification has been sent, so the hourly sweep
+  /// doesn't re-notify every run. Cleared whenever slaDueAt is pushed out or the ticket resolves.
+  slaBreachNotifiedAt DateTime?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
