@@ -3,6 +3,10 @@ import type { TicketStatus } from '@ticketing/shared';
 
 const PENDING_ESCALATION_MS = 1000 * 60 * 60 * 24; // 24 hours
 
+// Kept in sync with tickets.ts's RESOLVED_STATUSES -- not imported directly to avoid a
+// tickets.ts <-> notifications.ts circular import (tickets.ts already imports this module).
+const RESOLVED_STATUSES: readonly TicketStatus[] = ['resolved', 'closed'];
+
 export async function listNotificationsForUser(userId: string, limit = 30) {
   return prisma.notification.findMany({
     where: { userId },
@@ -242,6 +246,66 @@ export async function queuePendingEscalationDms(baseUrl: string): Promise<number
   ]);
 
   return withDiscord.length;
+}
+
+/**
+ * Background sweep: tickets overdue on their SLA (open/active, slaDueAt in the past) that
+ * haven't already had a breach alert sent get one now, targeted at their assignees (not the
+ * ticket owner -- this is an ops alert about response time, not a customer-facing update).
+ * Unassigned overdue tickets are stamped but silently skipped -- there's no one to alert.
+ */
+export async function queueSlaBreachAlerts(baseUrl: string): Promise<number> {
+  const tickets = await prisma.ticket.findMany({
+    where: {
+      slaDueAt: { lt: new Date() },
+      status: { notIn: [...RESOLVED_STATUSES] },
+      slaBreachNotifiedAt: null,
+    },
+    include: { assignees: { select: { id: true, discordId: true } } },
+  });
+
+  if (tickets.length === 0) return 0;
+
+  for (const ticket of tickets) {
+    const link = ticketLink(baseUrl, ticket.id);
+    const message = `SLA breached on "${ticket.title}" — view it here: ${link}`;
+    const withDiscord = ticket.assignees.filter(
+      (a): a is RecipientUser & { discordId: string } => a.discordId !== null,
+    );
+
+    await prisma.$transaction([
+      ...(ticket.assignees.length > 0
+        ? [
+            prisma.notification.createMany({
+              data: ticket.assignees.map((a) => ({
+                userId: a.id,
+                ticketId: ticket.id,
+                type: 'sla_breach' as const,
+                message: `SLA breached on "${ticket.title}"`,
+              })),
+            }),
+          ]
+        : []),
+      ...(withDiscord.length > 0
+        ? [
+            prisma.discordDm.createMany({
+              data: withDiscord.map((a) => ({
+                discordUserId: a.discordId,
+                ticketId: ticket.id,
+                kind: 'sla_breach' as const,
+                message,
+              })),
+            }),
+          ]
+        : []),
+      prisma.ticket.update({
+        where: { id: ticket.id },
+        data: { slaBreachNotifiedAt: new Date() },
+      }),
+    ]);
+  }
+
+  return tickets.length;
 }
 
 export async function listPendingDiscordDms(limit = 25) {

@@ -1,5 +1,6 @@
 const CLEANUP_INTERVAL_MS = 1000 * 60 * 60 * 24;
 const PENDING_ESCALATION_CHECK_INTERVAL_MS = 1000 * 60 * 60; // hourly
+const SLA_BREACH_CHECK_INTERVAL_MS = 1000 * 60 * 60; // hourly
 
 /**
  * Runs once per server process on boot (Next.js instrumentation hook). Single-process
@@ -11,7 +12,7 @@ export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
   const { cleanupExpiredAttachments } = await import('@/server/attachments');
-  const { queuePendingEscalationDms } = await import('@/server/notifications');
+  const { queuePendingEscalationDms, queueSlaBreachAlerts } = await import('@/server/notifications');
   const { env } = await import('@/lib/env');
   const { logger } = await import('@/lib/logger');
 
@@ -31,8 +32,18 @@ export async function register(): Promise<void> {
     }
   }
 
+  async function runSlaBreachCheck(): Promise<void> {
+    try {
+      await queueSlaBreachAlerts(env.publicAppUrl);
+    } catch (error) {
+      logger.error('SLA breach alert sweep failed', error);
+    }
+  }
+
   void runCleanup();
   void runPendingEscalationCheck();
+  void runSlaBreachCheck();
   setInterval(() => void runCleanup(), CLEANUP_INTERVAL_MS);
   setInterval(() => void runPendingEscalationCheck(), PENDING_ESCALATION_CHECK_INTERVAL_MS);
+  setInterval(() => void runSlaBreachCheck(), SLA_BREACH_CHECK_INTERVAL_MS);
 }
