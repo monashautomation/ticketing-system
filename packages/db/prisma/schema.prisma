@@ -168,6 +168,11 @@ model Ticket {
   /// Set once the SLA-breach alert DM/notification has been sent, so the hourly sweep
   /// doesn't re-notify every run. Cleared whenever slaDueAt is pushed out or the ticket resolves.
   slaBreachNotifiedAt DateTime?
+  /// Aggregates title/description + ticket_messages.body + ticket_attachments.ocrText,
+  /// maintained by Postgres triggers (see migration) -- not written from application code.
+  /// Prisma can't model tsvector directly, so this field is unreadable/unwritable via the
+  /// client; all access to it goes through prisma.$queryRaw in listTicketsForAdminQueue.
+  searchVector      Unsupported("tsvector")?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
@@ -242,9 +247,16 @@ model TicketAttachment {
   mimeType     String
   sizeBytes    Int
   storageKey   String   @unique
+  /// OCR-extracted text (image attachments only). Null = not yet attempted or not
+  /// an OCR-eligible mime type; see ocrProcessedAt to distinguish the two.
+  ocrText       String?
+  /// Stamped after one OCR attempt, success or failure, so the sweep never retries
+  /// forever. Non-null with ocrText null means OCR ran and found/extracted nothing.
+  ocrProcessedAt DateTime?
   createdAt    DateTime @default(now())
 
   @@index([ticketId])
+  @@index([ocrProcessedAt])
   @@map("ticket_attachments")
 }
 
