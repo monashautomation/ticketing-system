@@ -1,15 +1,27 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { TICKET_PRIORITIES, TICKET_STATUSES, type TicketStatus } from '@ticketing/shared';
+import {
+  parseSearchQuery,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  type TicketPriority,
+  type TicketStatus,
+} from '@ticketing/shared';
 import { getCurrentSession } from '@/lib/session';
 import { AppHeader } from '@/components/AppHeader';
-import { groupTicketsByStatus, isOverdue, listTicketsForAdminQueue } from '@/server/tickets';
+import {
+  groupTicketsByStatus,
+  isOverdue,
+  listTicketsForAdminQueue,
+  resolveSearchTokensToFilters,
+  type TicketQueueFilters,
+} from '@/server/tickets';
 import { listTags } from '@/server/tags';
 import { prisma } from '@ticketing/db';
+import { TicketSearchInput } from '@/components/TicketSearchInput';
 import {
   badgeDanger,
   buttonPrimary,
-  inputSm,
   mutedText,
   pageHeader,
   pageTitle,
@@ -32,8 +44,14 @@ interface PageProps {
     assigneeId?: string;
     tagId?: string;
     overdueOnly?: string;
-    search?: string;
+    q?: string;
   }>;
+}
+
+/** Merges a dropdown-selected single id with token-resolved ids into one array filter. */
+function mergeIds(single: string | undefined, tokenIds: string[] | undefined): string[] | undefined {
+  const ids = [...(single ? [single] : []), ...(tokenIds ?? [])];
+  return ids.length > 0 ? ids : undefined;
 }
 
 
@@ -119,18 +137,26 @@ export default async function AdminQueuePage({ searchParams }: PageProps) {
   if (!session || session.user.role !== 'admin') redirect('/');
 
   const filters = await searchParams;
-  const [tickets, tags, admins] = await Promise.all([
-    listTicketsForAdminQueue({
-      status: filters.status as TicketStatus | undefined,
-      priority: filters.priority as (typeof TICKET_PRIORITIES)[number] | undefined,
-      assigneeId: filters.assigneeId || undefined,
-      tagId: filters.tagId || undefined,
-      overdueOnly: filters.overdueOnly === 'true',
-      search: filters.search || undefined,
-    }),
+  const { tokens, freeText } = parseSearchQuery(filters.q ?? '');
+  const [tokenFilters, tags, admins] = await Promise.all([
+    resolveSearchTokensToFilters(tokens),
     listTags(),
     prisma.user.findMany({ where: { role: 'admin' }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
   ]);
+
+  const queueFilters: TicketQueueFilters = {
+    status: tokenFilters.status ?? (filters.status as TicketStatus | undefined),
+    priority: tokenFilters.priority ?? (filters.priority as TicketPriority | undefined),
+    type: tokenFilters.type,
+    assigneeId: mergeIds(filters.assigneeId, tokenFilters.assigneeId as string[] | undefined),
+    tagId: mergeIds(filters.tagId, tokenFilters.tagId as string[] | undefined),
+    createdById: tokenFilters.createdById,
+    watcherId: tokenFilters.watcherId,
+    overdueOnly: filters.overdueOnly === 'true',
+    search: freeText || undefined,
+  };
+
+  const tickets = await listTicketsForAdminQueue(queueFilters);
 
   const { active, closedOrResolved } = groupTicketsByStatus(tickets);
 
@@ -143,13 +169,7 @@ export default async function AdminQueuePage({ searchParams }: PageProps) {
         </div>
 
         <form className="mb-6 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-panel p-3 text-sm">
-          <input
-            type="text"
-            name="search"
-            defaultValue={filters.search}
-            placeholder="Search title…"
-            className={inputSm}
-          />
+          <TicketSearchInput defaultValue={filters.q ?? ''} tags={tags} admins={admins} />
           <select name="status" defaultValue={filters.status ?? ''} className={select}>
             <option value="">Any status</option>
             {TICKET_STATUSES.map((s) => (
