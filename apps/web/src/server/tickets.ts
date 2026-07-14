@@ -10,6 +10,7 @@ import {
   type UpdateTicketInput,
 } from '@ticketing/shared';
 import { AppError, NotFoundError } from '@/lib/errors';
+import { writeAuditLog } from '@/server/audit';
 import {
   handlePendingTransition,
   notifyReply,
@@ -21,7 +22,7 @@ import { publishTicketMessage } from '@/server/ticket-events';
 const TICKET_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const DISCORD_CLAIM_TTL_MS = 1000 * 60 * 30; // 30 minutes
 
-const RESOLVED_STATUSES: readonly TicketStatus[] = ['resolved', 'closed'];
+export const RESOLVED_STATUSES: readonly TicketStatus[] = ['resolved', 'closed'];
 
 export function isOverdue(ticket: { slaDueAt: Date | null; status: string }): boolean {
   if (!ticket.slaDueAt) return false;
@@ -160,7 +161,7 @@ export async function createTicket(
     }
   }
 
-  return prisma.ticket.create({
+  const ticket = await prisma.ticket.create({
     data: {
       title: input.title,
       description: input.description,
@@ -173,6 +174,10 @@ export async function createTicket(
     },
     include: { watchers: true, assignees: true },
   });
+
+  await writeAuditLog(userId, 'ticket.create', 'Ticket', ticket.id, input as Prisma.InputJsonValue);
+
+  return ticket;
 }
 
 /**
@@ -205,6 +210,11 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
       createdById: owner.id,
       discordChannelId: input.discordChannelId,
     },
+  });
+
+  await writeAuditLog(null, 'ticket.create', 'Ticket', ticket.id, {
+    source: 'discord',
+    discordUserId: input.discordUserId,
   });
 
   if (owner.isDiscordPlaceholder) {
@@ -328,6 +338,11 @@ export async function claimDiscordAccount(token: string, realUserId: string) {
     }),
   ]);
 
+  await writeAuditLog(realUserId, 'discord.claim', 'User', realUserId, {
+    placeholderUserId: placeholder.id,
+    discordId: placeholder.discordId,
+  });
+
   return { ticketId: claim.ticketId };
 }
 
@@ -403,6 +418,8 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
 
   if (input.slaDueAt !== undefined) {
     data.slaDueAt = input.slaDueAt ? new Date(input.slaDueAt) : null;
+    // A new/pushed-out deadline invalidates any prior breach alert dedupe stamp.
+    data.slaBreachNotifiedAt = null;
   }
 
   if (input.tagIds !== undefined) {
@@ -419,15 +436,7 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
     include: { tags: true, assignees: true, createdBy: true, watchers: true },
   });
 
-  await prisma.auditLog.create({
-    data: {
-      actorId,
-      action: 'ticket.update',
-      targetType: 'Ticket',
-      targetId: ticketId,
-      meta: input as Prisma.InputJsonValue,
-    },
-  });
+  await writeAuditLog(actorId, 'ticket.update', 'Ticket', ticketId, input as Prisma.InputJsonValue);
 
   if (input.status && input.status !== previous.status) {
     if (RESOLVED_STATUSES.includes(input.status)) {
