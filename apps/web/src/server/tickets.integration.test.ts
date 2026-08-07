@@ -6,9 +6,12 @@ import {
   claimDiscordAccount,
   createTicket,
   createTicketFromDiscord,
+  createTicketShareLink,
   getTicketMetrics,
   listTicketsForAdminQueue,
   listTicketsForUser,
+  previewTicketShareLink,
+  redeemTicketShareLink,
   resolveSearchTokensToFilters,
   updateTicket,
   verifyTicketToken,
@@ -615,5 +618,82 @@ describe('getTicketMetrics', () => {
     expect(metrics.avgResolutionMs).not.toBeNull();
     expect(metrics.byPriority.normal).toBe(1);
     expect(metrics.byPriority.high).toBe(1);
+  });
+});
+
+describe('ticket share links', () => {
+  it('CCs the redeeming user as a watcher and is reusable for a second person', async () => {
+    const owner = await createTestUser();
+    const friend = await createTestUser({ name: 'Friend', email: 'friend@test.local' });
+    const other = await createTestUser({ name: 'Other', email: 'other-cc@test.local' });
+
+    const ticket = await createTicket(owner.id, 'user', {
+      title: 'Shared ticket',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    const { path } = await createTicketShareLink(ticket.id, owner.id);
+    const token = tokenFromPath(path);
+
+    expect(await previewTicketShareLink(token, ticket.id)).toEqual({ ticketTitle: ticket.title });
+
+    await redeemTicketShareLink(token, ticket.id, friend.id);
+    let updated = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticket.id },
+      include: { watchers: true },
+    });
+    expect(updated.watchers.map((w) => w.id)).toEqual([friend.id]);
+
+    await redeemTicketShareLink(token, ticket.id, other.id);
+    updated = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticket.id },
+      include: { watchers: true },
+    });
+    expect(updated.watchers.map((w) => w.id).sort()).toEqual([friend.id, other.id].sort());
+  });
+
+  it('is a no-op when the redeeming user already has access', async () => {
+    const owner = await createTestUser();
+    const ticket = await createTicket(owner.id, 'user', {
+      title: 'Own ticket',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    const { path } = await createTicketShareLink(ticket.id, owner.id);
+    await redeemTicketShareLink(tokenFromPath(path), ticket.id, owner.id);
+
+    const updated = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticket.id },
+      include: { watchers: true },
+    });
+    expect(updated.watchers).toHaveLength(0);
+  });
+
+  it('rejects an expired or mismatched-ticket token', async () => {
+    const owner = await createTestUser();
+    const friend = await createTestUser({ name: 'Friend', email: 'friend2@test.local' });
+
+    const ticketA = await createTicket(owner.id, 'user', {
+      title: 'A',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+    const ticketB = await createTicket(owner.id, 'user', {
+      title: 'B',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    const { path } = await createTicketShareLink(ticketA.id, owner.id);
+    const token = tokenFromPath(path);
+
+    expect(await previewTicketShareLink(token, ticketB.id)).toBeNull();
+    await expect(redeemTicketShareLink(token, ticketB.id, friend.id)).rejects.toThrow();
   });
 });

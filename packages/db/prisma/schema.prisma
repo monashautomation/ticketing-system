@@ -95,6 +95,7 @@ model User {
   auditLogs       AuditLog[]
   uploadedAttachments TicketAttachment[]
   notifications   Notification[]
+  ticketShareLinksCreated TicketShareLink[]
 
   @@map("users")
 }
@@ -178,6 +179,7 @@ model Ticket {
 
   messages      TicketMessage[]
   accessTokens  TicketAccessToken[]
+  shareLinks    TicketShareLink[]
   attachments   TicketAttachment[]
   tags          Tag[]               @relation("TicketTags")
   watchers      User[]              @relation("TicketWatchers")
@@ -285,6 +287,24 @@ model TicketAccessToken {
 
   @@index([ticketId])
   @@map("ticket_access_tokens")
+}
+
+/// A "Share ticket" invite link. Unlike TicketAccessToken (unauthenticated view-only, minted
+/// for pre-link Discord users), redeeming this always requires signing in, and doing so adds
+/// the signed-in user as a ticket watcher (CC). Not single-use -- anyone holding the link can
+/// redeem it until it expires, so multiple people can be CC'd from the same link.
+model TicketShareLink {
+  id          String   @id @default(cuid())
+  ticketId    String
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tokenHash   String   @unique
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([ticketId])
+  @@map("ticket_share_links")
 }
 
 /// Tracks a pending Discord-to-Authentik claim for a placeholder user created

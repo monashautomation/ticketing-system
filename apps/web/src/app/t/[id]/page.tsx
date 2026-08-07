@@ -10,6 +10,7 @@ import { AdminTicketControls } from '@/components/AdminTicketControls';
 import { TicketAttachments } from '@/components/TicketAttachments';
 import { TicketTitleEditor } from '@/components/TicketTitleEditor';
 import { CcEditor } from '@/components/CcEditor';
+import { ShareTicketButton } from '@/components/ShareTicketButton';
 import { backLink, badgeDanger, mutedText, page } from '@/lib/styles';
 import { StatusPill } from '@/lib/ticketStatus';
 import { PriorityPill } from '@/lib/ticketPriority';
@@ -64,7 +65,10 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
             <p className={`mt-1 ${mutedText}`}>{ticket.description}</p>
           </div>
         )}
-        <StatusPill status={ticket.status} />
+        <div className="flex shrink-0 items-center gap-3">
+          {(isAdmin || isOwner) && <ShareTicketButton ticketId={ticket.id} />}
+          <StatusPill status={ticket.status} />
+        </div>
       </div>
 
       <p className={`mb-3 ${mutedText} ${isClosed ? 'opacity-60' : ''}`}>

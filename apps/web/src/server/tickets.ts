@@ -26,6 +26,7 @@ import { publishTicketMessage } from '@/server/ticket-events';
 
 const TICKET_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const DISCORD_CLAIM_TTL_MS = 1000 * 60 * 30; // 30 minutes
+const SHARE_LINK_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
 export const RESOLVED_STATUSES: readonly TicketStatus[] = ['resolved', 'closed'];
 
@@ -265,6 +266,63 @@ export async function verifyTicketToken(ticketId: string, token: string): Promis
   if (!record || record.ticketId !== ticketId) return false;
   if (record.expiresAt < new Date()) return false;
   return true;
+}
+
+/** Only the ticket's creator or an admin may mint a share link. */
+export function canShareTicket(
+  ticket: { createdById: string },
+  user: { id: string; role: 'user' | 'admin' },
+): boolean {
+  return user.role === 'admin' || ticket.createdById === user.id;
+}
+
+/** Mints (or re-mints) a reusable "share ticket" invite link. Redeeming it CCs whoever opens
+ * it -- see redeemTicketShareLink -- so it's intentionally not single-use. */
+export async function createTicketShareLink(ticketId: string, createdById: string) {
+  const rawToken = randomBytes(32).toString('hex');
+  await prisma.ticketShareLink.create({
+    data: {
+      ticketId,
+      createdById,
+      tokenHash: hashToken(rawToken),
+      expiresAt: new Date(Date.now() + SHARE_LINK_TTL_MS),
+    },
+  });
+  return { path: `/t/${ticketId}/share?token=${rawToken}` };
+}
+
+/** Read-only lookup for the share-link redemption page. */
+export async function previewTicketShareLink(token: string, ticketId: string) {
+  const link = await prisma.ticketShareLink.findUnique({ where: { tokenHash: hashToken(token) } });
+  if (!link || link.ticketId !== ticketId || link.expiresAt < new Date()) return null;
+  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+  if (!ticket) return null;
+  return { ticketTitle: ticket.title };
+}
+
+/** Adds the signed-in user as a watcher (CC) on the ticket a share link points to. Idempotent --
+ * safe to call repeatedly for the same user (e.g. reopening the link) or for someone who
+ * already has access (owner, assignee, admin), in which case it's a no-op. */
+export async function redeemTicketShareLink(token: string, ticketId: string, userId: string) {
+  const link = await prisma.ticketShareLink.findUnique({ where: { tokenHash: hashToken(token) } });
+  if (!link || link.ticketId !== ticketId || link.expiresAt < new Date()) {
+    throw new AppError('This share link has expired. Ask the ticket owner to share it again.');
+  }
+
+  const ticket = await getTicketOr404(ticketId);
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new NotFoundError('User not found');
+
+  const alreadyHasAccess = canViewTicket(ticket, { id: userId, role: user.role });
+  if (!alreadyHasAccess) {
+    await prisma.ticket.update({
+      where: { id: ticketId },
+      data: { watchers: { connect: { id: userId } } },
+    });
+    await writeAuditLog(userId, 'ticket.share_link_redeem', 'Ticket', ticketId, {});
+  }
+
+  return { ticketId };
 }
 
 export async function createTicket(
