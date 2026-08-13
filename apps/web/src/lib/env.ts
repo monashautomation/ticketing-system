@@ -17,6 +17,8 @@ export const env = {
     .map((g) => g.trim())
     .filter(Boolean),
   internalApiSecret: required('INTERNAL_API_SECRET'),
+  directoryServiceApiUrl: required('DIRECTORY_SERVICE_API_URL'),
+  directoryServiceApiKey: required('DIRECTORY_SERVICE_API_KEY'),
   uptimeKumaWebhookSecret: required('UPTIME_KUMA_WEBHOOK_SECRET'),
   publicAppUrl: required('PUBLIC_APP_URL'),
   s3Endpoint: required('S3_ENDPOINT'),
