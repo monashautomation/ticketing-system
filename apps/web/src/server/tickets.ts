@@ -1,5 +1,5 @@
 import { randomBytes, createHash } from 'node:crypto';
-import { prisma, Prisma } from '@ticketing/db';
+import { prisma, Prisma, type User } from '@ticketing/db';
 import {
   CLOSE_REASON_LABELS,
   TICKET_PRIORITIES,
@@ -17,12 +17,15 @@ import {
 import { AppError, NotFoundError } from '@/lib/errors';
 import { writeAuditLog } from '@/server/audit';
 import {
+  handleActiveStatusTransition,
   handlePendingTransition,
+  notifyNewTicketChannel,
   notifyReply,
   notifyStatusChanged,
   notifyTicketCreated,
 } from '@/server/notifications';
 import { publishTicketMessage } from '@/server/ticket-events';
+import { lookupDirectoryUserByDiscordUsername } from '@/lib/directoryService';
 
 const TICKET_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const DISCORD_CLAIM_TTL_MS = 1000 * 60 * 30; // 30 minutes
@@ -382,36 +385,80 @@ export async function createTicket(
         watchers: ccUserIds.length > 0 ? { connect: ccUserIds.map((id) => ({ id })) } : undefined,
         assignees:
           assigneeIds.length > 0 ? { connect: assigneeIds.map((id) => ({ id })) } : undefined,
+        // Ticket.status defaults to 'open', which is in the active-reminder status set --
+        // stamp the clock at creation so the 24h assignee reminder sweep has a start point.
+        activeSince: new Date(),
       },
       include: { watchers: true, assignees: true },
     });
   });
 
   await writeAuditLog(userId, 'ticket.create', 'Ticket', ticket.id, input as Prisma.InputJsonValue);
+  await notifyNewTicketChannel(ticket);
 
   return ticket;
 }
 
 /**
- * Creates a ticket from a Discord interaction. Auto-links to an existing user by discordId.
- * Unlinked Discord users get a Discord-only placeholder owner and a claim link that, once they
- * sign in with Authentik, silently attaches their discordId to their real account (see
- * claimDiscordAccount). Already-linked users get a direct token URL -- no login required.
+ * Resolves the ticketing-system owner for an incoming Discord ticket.
+ *
+ * Resolution order:
+ * 1. Local `discordId` match (fast path -- already resolved by a prior call, either through
+ *    this same lookup or the legacy claim flow).
+ * 2. directory-service lookup by Discord username. directory-service is the source of truth
+ *    for org-member Discord linkage (see hourly discordId refresh sweep), so a match here means
+ *    a real org member even if they've never signed in to ticketing via Authentik before --
+ *    upsert a real (non-placeholder) User by email, no claim step needed.
+ * 3. No match anywhere (genuine outsider/guest, not an org member): fall back to the
+ *    Discord-only placeholder + claim-on-first-login flow, unchanged from before.
+ */
+async function resolveDiscordTicketOwner(
+  discordUserId: string,
+  discordUsername: string,
+): Promise<{ owner: User; isNewUser: boolean }> {
+  const existingByDiscordId = await prisma.user.findUnique({ where: { discordId: discordUserId } });
+  if (existingByDiscordId) return { owner: existingByDiscordId, isNewUser: false };
+
+  const directoryUser = await lookupDirectoryUserByDiscordUsername(discordUsername);
+  if (directoryUser) {
+    const existingByEmail = await prisma.user.findUnique({ where: { email: directoryUser.email } });
+    const owner = await prisma.user.upsert({
+      where: { email: directoryUser.email },
+      create: {
+        email: directoryUser.email,
+        name: directoryUser.name || discordUsername,
+        emailVerified: true,
+        discordId: discordUserId,
+        isDiscordPlaceholder: false,
+      },
+      update: {
+        discordId: discordUserId,
+        isDiscordPlaceholder: false,
+      },
+    });
+    return { owner, isNewUser: !existingByEmail };
+  }
+
+  const owner = await prisma.user.create({
+    data: {
+      email: `discord-${discordUserId}@placeholder.invalid`,
+      name: discordUsername,
+      discordId: discordUserId,
+      emailVerified: false,
+      isDiscordPlaceholder: true,
+    },
+  });
+  return { owner, isNewUser: true };
+}
+
+/**
+ * Creates a ticket from a Discord interaction. See resolveDiscordTicketOwner for owner
+ * resolution. A placeholder owner (true outsider, not found anywhere) gets a claim link that,
+ * once they sign in with Authentik, silently attaches their discordId to their real account
+ * (see claimDiscordAccount). Everyone else gets a direct token URL -- no login required.
  */
 export async function createTicketFromDiscord(input: CreateInternalTicketInput, baseUrl: string) {
-  const existingUser = await prisma.user.findUnique({ where: { discordId: input.discordUserId } });
-
-  const owner =
-    existingUser ??
-    (await prisma.user.create({
-      data: {
-        email: `discord-${input.discordUserId}@placeholder.invalid`,
-        name: input.discordUsername,
-        discordId: input.discordUserId,
-        emailVerified: false,
-        isDiscordPlaceholder: true,
-      },
-    }));
+  const { owner, isNewUser } = await resolveDiscordTicketOwner(input.discordUserId, input.discordUsername);
 
   const ticket = await prisma.$transaction(async (tx) => {
     const incidentNumber = await nextIncidentNumber(tx);
@@ -424,6 +471,9 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
         type: input.type,
         createdById: owner.id,
         discordChannelId: input.discordChannelId,
+        // Ticket.status defaults to 'open', which is in the active-reminder status set --
+        // stamp the clock at creation so the 24h assignee reminder sweep has a start point.
+        activeSince: new Date(),
       },
     });
   });
@@ -432,6 +482,7 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
     source: 'discord',
     discordUserId: input.discordUserId,
   });
+  await notifyNewTicketChannel(ticket);
 
   if (owner.isDiscordPlaceholder) {
     const rawClaimToken = randomBytes(32).toString('hex');
@@ -459,7 +510,7 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
     return {
       ticket,
       path: claimPath,
-      isNewUser: !existingUser,
+      isNewUser,
     };
   }
 
@@ -481,7 +532,7 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
   return {
     ticket,
     path: tokenPath,
-    isNewUser: !existingUser,
+    isNewUser,
   };
 }
 
@@ -687,6 +738,7 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
     const { env } = await import('@/lib/env');
     await notifyStatusChanged(ticket, input.status, actorId, env.publicAppUrl);
     await handlePendingTransition(ticket, previous.status, env.publicAppUrl);
+    await handleActiveStatusTransition(ticketId, input.status);
   }
 
   return ticket;
