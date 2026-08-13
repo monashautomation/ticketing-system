@@ -41,6 +41,10 @@ function postJson(url: string, body: unknown, headers: Record<string, string>): 
   });
 }
 
+// discordbot-api's Django settings force SECURE_SSL_REDIRECT based on
+// X-Forwarded-Proto; calling it over plain internal HTTP without that header
+// gets a 301 to a https URL the ClusterIP doesn't serve.
+
 /**
  * Sends a DM via the external Discord bot HTTP API instead of the local
  * discord.js gateway connection. Replaces `client.users.fetch` + `user.send`.
@@ -49,7 +53,7 @@ export async function sendDiscordDm(userId: string, content: string): Promise<vo
   const { status, text } = await postJson(
     `${env.discordDmApiUrl}/api/v1/dm/`,
     { user_id: userId, content },
-    { Authorization: `Bearer ${env.discordDmApiKey}` },
+    { Authorization: `Bearer ${env.discordDmApiKey}`, 'X-Forwarded-Proto': 'https' },
   );
 
   if (status < 200 || status >= 300) {
@@ -65,7 +69,7 @@ export async function sendDiscordChannelMessage(channelId: string, content: stri
   const { status, text } = await postJson(
     `${env.discordDmApiUrl}/api/v1/messages/`,
     { channel_id: channelId, content },
-    { Authorization: `Bearer ${env.discordDmApiKey}` },
+    { Authorization: `Bearer ${env.discordDmApiKey}`, 'X-Forwarded-Proto': 'https' },
   );
 
   if (status < 200 || status >= 300) {
