@@ -1,0 +1,5 @@
+procs:
+  web:
+    cmd: ["pnpm", "dev:web"]
+  bot:
+    cmd: ["pnpm", "dev:bot"]

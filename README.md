@@ -143,6 +143,12 @@ pnpm dev:web   # apps/web, http://localhost:3000, hot reload
 pnpm dev:bot   # apps/bot, separate terminal, hot reload via tsx watch
 ```
 
+Or run both at once, split-pane, via [mprocs](https://github.com/pvolok/mprocs):
+
+```bash
+pnpm dev
+```
+
 ### Testing
 
 ```bash
