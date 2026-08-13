@@ -5,11 +5,11 @@ resources:
 - ../../base
 images:
 - name: ghcr.io/monashautomation/ticketing-bot
-  newTag: sha-caa3781
+  newTag: sha-ddb5e74
 - name: ghcr.io/monashautomation/ticketing-migrate
-  newTag: sha-caa3781
+  newTag: sha-ddb5e74
 - name: ghcr.io/monashautomation/ticketing-web
-  newTag: sha-caa3781
+  newTag: sha-ddb5e74
 replicas:
 - count: 2
   name: ticketing-web
