@@ -87,6 +87,8 @@ function TicketRow({
                 <div>
                     <p className="font-medium text-text">{ticket.title}</p>
                     <p className={mutedText}>
+                        <span className="font-mono">{ticket.incidentNumber}</span>
+                        {" · "}
                         {ticket.createdBy.name}
                         {ticket.assignees.length > 0
                             ? ` · assigned to ${ticket.assignees.map((a) => a.name).join(", ")}`

@@ -82,6 +82,25 @@ function hashToken(token: string): string {
 }
 
 /**
+ * Atomically increments (creating if absent) the current year's row in
+ * TicketIncidentCounter and returns the next "INC-YYYY-NNNNNN" ref. Must run inside
+ * the same $transaction as the ticket create it backs, so a rolled-back ticket create
+ * doesn't leave the counter incremented and a number burned.
+ */
+async function nextIncidentNumber(tx: Prisma.TransactionClient): Promise<string> {
+  const year = new Date().getFullYear();
+  const rows = await tx.$queryRaw<{ lastValue: number }[]>`
+    INSERT INTO "ticket_incident_counters" ("year", "lastValue")
+    VALUES (${year}, 1)
+    ON CONFLICT ("year") DO UPDATE SET "lastValue" = "ticket_incident_counters"."lastValue" + 1
+    RETURNING "lastValue"
+  `;
+  const row = rows[0];
+  if (!row) throw new Error('Failed to allocate incident number');
+  return `INC-${year}-${String(row.lastValue).padStart(6, '0')}`;
+}
+
+/**
  * Always scoped to tickets the user submitted or is cc'd on -- admins included. Admins reach
  * every ticket through listTicketsForAdminQueue (the separate admin queue page), never here.
  */
@@ -350,18 +369,22 @@ export async function createTicket(
     }
   }
 
-  const ticket = await prisma.ticket.create({
-    data: {
-      title: input.title,
-      description: input.description,
-      priority: input.priority,
-      type: input.type,
-      createdById: userId,
-      watchers: ccUserIds.length > 0 ? { connect: ccUserIds.map((id) => ({ id })) } : undefined,
-      assignees:
-        assigneeIds.length > 0 ? { connect: assigneeIds.map((id) => ({ id })) } : undefined,
-    },
-    include: { watchers: true, assignees: true },
+  const ticket = await prisma.$transaction(async (tx) => {
+    const incidentNumber = await nextIncidentNumber(tx);
+    return tx.ticket.create({
+      data: {
+        incidentNumber,
+        title: input.title,
+        description: input.description,
+        priority: input.priority,
+        type: input.type,
+        createdById: userId,
+        watchers: ccUserIds.length > 0 ? { connect: ccUserIds.map((id) => ({ id })) } : undefined,
+        assignees:
+          assigneeIds.length > 0 ? { connect: assigneeIds.map((id) => ({ id })) } : undefined,
+      },
+      include: { watchers: true, assignees: true },
+    });
   });
 
   await writeAuditLog(userId, 'ticket.create', 'Ticket', ticket.id, input as Prisma.InputJsonValue);
@@ -390,15 +413,19 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
       },
     }));
 
-  const ticket = await prisma.ticket.create({
-    data: {
-      title: input.title,
-      description: input.description,
-      priority: input.priority,
-      type: input.type,
-      createdById: owner.id,
-      discordChannelId: input.discordChannelId,
-    },
+  const ticket = await prisma.$transaction(async (tx) => {
+    const incidentNumber = await nextIncidentNumber(tx);
+    return tx.ticket.create({
+      data: {
+        incidentNumber,
+        title: input.title,
+        description: input.description,
+        priority: input.priority,
+        type: input.type,
+        createdById: owner.id,
+        discordChannelId: input.discordChannelId,
+      },
+    });
   });
 
   await writeAuditLog(null, 'ticket.create', 'Ticket', ticket.id, {
@@ -424,7 +451,10 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
     });
 
     const claimPath = `/link-discord/claim?token=${rawClaimToken}`;
-    await notifyTicketCreated({ id: ticket.id, createdBy: owner }, `${baseUrl}${claimPath}`);
+    await notifyTicketCreated(
+      { id: ticket.id, incidentNumber: ticket.incidentNumber, createdBy: owner },
+      `${baseUrl}${claimPath}`,
+    );
 
     return {
       ticket,
@@ -443,7 +473,10 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
   });
 
   const tokenPath = `/t/${ticket.id}?token=${rawToken}`;
-  await notifyTicketCreated({ id: ticket.id, createdBy: owner }, `${baseUrl}${tokenPath}`);
+  await notifyTicketCreated(
+    { id: ticket.id, incidentNumber: ticket.incidentNumber, createdBy: owner },
+    `${baseUrl}${tokenPath}`,
+  );
 
   return {
     ticket,

@@ -52,6 +52,8 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
         ← Back to tickets
       </Link>
 
+      <p className={`mb-1 font-mono text-xs ${mutedText}`}>{ticket.incidentNumber}</p>
+
       <div className={`mb-6 flex items-start justify-between gap-4 ${isClosed ? 'opacity-60' : ''}`}>
         {isAdmin ? (
           <TicketTitleEditor

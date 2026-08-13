@@ -65,6 +65,7 @@ function TicketTable({
       <table className={table}>
         <thead className={tableHead}>
           <tr>
+            <th className={tableHeadCell}>Ref</th>
             <th className={tableHeadCell}>Title</th>
             <th className={tableHeadCell}>Submitted by</th>
             <th className={tableHeadCell}>Status</th>
@@ -79,6 +80,9 @@ function TicketTable({
             const overdue = isOverdue(ticket);
             return (
               <tr key={ticket.id} className={overdue ? 'bg-danger-soft' : undefined}>
+                <td className={`${tableCell} text-text-secondary font-mono text-xs`}>
+                  {ticket.incidentNumber}
+                </td>
                 <td className={tableCell}>
                   <Link href={`/t/${ticket.id}`} className="font-medium text-text hover:text-accent">
                     {ticket.title}

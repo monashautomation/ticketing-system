@@ -152,6 +152,10 @@ model Verification {
 
 model Ticket {
   id                String       @id @default(cuid())
+  /// Human-readable ref shown to users/admins/Discord, e.g. "INC-2026-000123".
+  /// Distinct from `id` (internal cuid PK). Generated from TicketIncidentCounter,
+  /// see nextIncidentNumber() in server/tickets.ts.
+  incidentNumber    String       @unique
   title             String
   description       String
   status            TicketStatus @default(open)
@@ -191,6 +195,16 @@ model Ticket {
   @@index([createdById])
   @@index([slaDueAt])
   @@map("tickets")
+}
+
+/// Backs Ticket.incidentNumber generation: one row per calendar year, incremented
+/// atomically (INSERT ... ON CONFLICT DO UPDATE) inside the same transaction as the
+/// ticket create, so numbers are gapless-per-year and collision-free under concurrency.
+model TicketIncidentCounter {
+  year      Int @id
+  lastValue Int @default(0)
+
+  @@map("ticket_incident_counters")
 }
 
 /// In-app notification tray entry. One row per (user, event) -- e.g. every watcher on a

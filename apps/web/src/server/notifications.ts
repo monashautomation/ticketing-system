@@ -12,7 +12,7 @@ export async function listNotificationsForUser(userId: string, limit = 30) {
     where: { userId },
     orderBy: { createdAt: 'desc' },
     take: limit,
-    include: { ticket: { select: { id: true, title: true } } },
+    include: { ticket: { select: { id: true, title: true, incidentNumber: true } } },
   });
 }
 
@@ -49,6 +49,7 @@ interface RecipientUser {
 
 interface TicketForNotify {
   id: string;
+  incidentNumber: string;
   title: string;
   createdBy: RecipientUser;
   watchers: RecipientUser[];
@@ -92,14 +93,14 @@ async function queueDiscordDms(
  * placeholder user only has a claim link, not a direct `/t/{id}` link, to view the ticket.
  */
 export async function notifyTicketCreated(
-  ticket: { id: string; createdBy: RecipientUser },
+  ticket: { id: string; incidentNumber: string; createdBy: RecipientUser },
   link: string,
 ): Promise<void> {
   await queueDiscordDms(
     ticket.id,
     [ticket.createdBy],
     'ticket_created',
-    `Your ticket has been created — view it here: ${link}`,
+    `Your ticket ${ticket.incidentNumber} has been created — view it here: ${link}`,
   );
 }
 
@@ -117,7 +118,7 @@ export async function notifyReply(
       userId: r.id,
       ticketId: ticket.id,
       type: 'reply' as const,
-      message: `New reply on "${ticket.title}"`,
+      message: `New reply on ${ticket.incidentNumber} "${ticket.title}"`,
     })),
   });
 
@@ -167,7 +168,7 @@ export async function notifyStatusChanged(
         userId: r.id,
         ticketId: ticket.id,
         type: 'status_changed' as const,
-        message: `Your ticket "${ticket.title}" ${label}`,
+        message: `Your ticket ${ticket.incidentNumber} "${ticket.title}" ${label}`,
       })),
     });
   }
@@ -268,7 +269,7 @@ export async function queueSlaBreachAlerts(baseUrl: string): Promise<number> {
 
   for (const ticket of tickets) {
     const link = ticketLink(baseUrl, ticket.id);
-    const message = `SLA breached on "${ticket.title}" — view it here: ${link}`;
+    const message = `SLA breached on ${ticket.incidentNumber} "${ticket.title}" — view it here: ${link}`;
     const withDiscord = ticket.assignees.filter(
       (a): a is RecipientUser & { discordId: string } => a.discordId !== null,
     );
@@ -281,7 +282,7 @@ export async function queueSlaBreachAlerts(baseUrl: string): Promise<number> {
                 userId: a.id,
                 ticketId: ticket.id,
                 type: 'sla_breach' as const,
-                message: `SLA breached on "${ticket.title}"`,
+                message: `SLA breached on ${ticket.incidentNumber} "${ticket.title}"`,
               })),
             }),
           ]
