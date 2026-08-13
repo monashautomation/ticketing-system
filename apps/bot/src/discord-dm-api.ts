@@ -1,23 +1,59 @@
+import http from 'node:http';
+import https from 'node:https';
 import { env } from './env';
-import { logger } from './logger';
+
+/**
+ * Posts JSON via Node's core http/https client instead of the global `fetch`
+ * (undici). undici's connect hangs indefinitely against discordbot-api's
+ * ClusterIP from this pod even though DNS resolution and a raw `net.connect`
+ * both succeed instantly -- a reproducible undici-specific quirk on this
+ * cluster. Core http does not share undici's connection path.
+ */
+function postJson(url: string, body: unknown, headers: Record<string, string>): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const transport = target.protocol === 'https:' ? https : http;
+    const payload = JSON.stringify(body);
+
+    const req = transport.request(
+      target,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          text += chunk;
+        });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, text }));
+      },
+    );
+
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
 
 /**
  * Sends a DM via the external Discord bot HTTP API instead of the local
  * discord.js gateway connection. Replaces `client.users.fetch` + `user.send`.
  */
 export async function sendDiscordDm(userId: string, content: string): Promise<void> {
-  const res = await fetch(`${env.discordDmApiUrl}/api/v1/dm/`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.discordDmApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ user_id: userId, content }),
-  });
+  const { status, text } = await postJson(
+    `${env.discordDmApiUrl}/api/v1/dm/`,
+    { user_id: userId, content },
+    { Authorization: `Bearer ${env.discordDmApiKey}` },
+  );
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Discord DM API request failed with status ${res.status}: ${body}`);
+  if (status < 200 || status >= 300) {
+    throw new Error(`Discord DM API request failed with status ${status}: ${text}`);
   }
 }
 
@@ -26,17 +62,13 @@ export async function sendDiscordDm(userId: string, content: string): Promise<vo
  * sendDiscordDm -- both endpoints are admin-scope on the one bearer token.
  */
 export async function sendDiscordChannelMessage(channelId: string, content: string): Promise<void> {
-  const res = await fetch(`${env.discordDmApiUrl}/api/v1/messages/`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.discordDmApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ channel_id: channelId, content }),
-  });
+  const { status, text } = await postJson(
+    `${env.discordDmApiUrl}/api/v1/messages/`,
+    { channel_id: channelId, content },
+    { Authorization: `Bearer ${env.discordDmApiKey}` },
+  );
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Discord channel message API request failed with status ${res.status}: ${body}`);
+  if (status < 200 || status >= 300) {
+    throw new Error(`Discord channel message API request failed with status ${status}: ${text}`);
   }
 }
