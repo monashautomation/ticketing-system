@@ -65,6 +65,13 @@ enum DiscordDmKind {
   closed
   resolved
   sla_breach
+  assignee_updated
+  assignee_idle_reminder
+}
+
+enum DiscordChannelMessageKind {
+  ticket_created
+  unassigned_backlog
 }
 
 /// BetterAuth-managed user table. id/email/emailVerified/name/image/createdAt/updatedAt
@@ -173,6 +180,11 @@ model Ticket {
   /// Set once the SLA-breach alert DM/notification has been sent, so the hourly sweep
   /// doesn't re-notify every run. Cleared whenever slaDueAt is pushed out or the ticket resolves.
   slaBreachNotifiedAt DateTime?
+  /// Set whenever status transitions into (or between) open/in_progress/escalated; cleared
+  /// on leaving that set. Drives the 24h "still sitting" reminder DM to assignees -- distinct
+  /// from pendingSince, which is pending-only and targets the creator, not assignees.
+  activeSince           DateTime?
+  activeReminderSentAt  DateTime?
   /// Aggregates title/description + ticket_messages.body + ticket_attachments.ocrText,
   /// maintained by Postgres triggers (see migration) -- not written from application code.
   /// Prisma can't model tsvector directly, so this field is unreadable/unwritable via the
@@ -240,6 +252,35 @@ model DiscordDm {
 
   @@index([sentAt])
   @@map("discord_dms")
+}
+
+/// Outbound Discord channel-message queue, mirrors DiscordDm. apps/bot polls this
+/// alongside the DM queue and posts via discordbot's POST /api/v1/messages/.
+model DiscordChannelMessage {
+  id        String                     @id @default(cuid())
+  channelId String
+  kind      DiscordChannelMessageKind
+  message   String
+  sentAt    DateTime?
+  createdAt DateTime                   @default(now())
+
+  @@index([sentAt])
+  @@index([kind, createdAt])
+  @@map("discord_channel_messages")
+}
+
+/// Singleton admin-configurable Discord settings row (id is always "singleton").
+/// Edited via /admin/settings, gated the same as the rest of /admin (role === 'admin').
+model DiscordSettings {
+  id                        String   @id @default("singleton")
+  /// Channel a "new ticket created" message is posted to. Null = feature off.
+  newTicketChannelId        String?
+  /// Channel the daily unassigned-ticket-backlog alert is posted to. Null = feature off.
+  unassignedAlertChannelId  String?
+  updatedById               String?
+  updatedAt                 DateTime @updatedAt
+
+  @@map("discord_settings")
 }
 
 model Tag {
