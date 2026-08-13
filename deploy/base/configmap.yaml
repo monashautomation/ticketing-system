@@ -20,7 +20,7 @@ metadata:
   name: ticketing-bot-config
 data:
   INTERNAL_API_URL: "http://ticketing-web"
-  DISCORD_DM_API_URL: "https://discordbot.monashautomation.com"
+  DISCORD_DM_API_URL: "http://discordbot-api.discordbot.svc.cluster.local:8000"
   NODE_ENV: "production"
 ---
 apiVersion: v1
