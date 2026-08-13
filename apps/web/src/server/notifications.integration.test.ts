@@ -38,7 +38,9 @@ describe('ticket-created Discord DM (via createTicketFromDiscord)', () => {
     expect(dms).toHaveLength(1);
     expect(dms[0]?.kind).toBe('ticket_created');
     expect(dms[0]?.discordUserId).toBe('discord-created-1');
-    expect(dms[0]?.message).toBe(`Your ticket has been created — view it here: ${BASE_URL}${path}`);
+    expect(dms[0]?.message).toBe(
+      `Your ticket ${ticket.incidentNumber} has been created — view it here: ${BASE_URL}${path}`,
+    );
   });
 
   it('queues a DM with the direct token link for an already-linked user', async () => {
@@ -59,7 +61,9 @@ describe('ticket-created Discord DM (via createTicketFromDiscord)', () => {
     const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id } });
     expect(dms).toHaveLength(1);
     expect(dms[0]?.discordUserId).toBe('discord-created-2');
-    expect(dms[0]?.message).toBe(`Your ticket has been created — view it here: ${BASE_URL}${path}`);
+    expect(dms[0]?.message).toBe(
+      `Your ticket ${ticket.incidentNumber} has been created — view it here: ${BASE_URL}${path}`,
+    );
   });
 });
 
@@ -80,7 +84,7 @@ describe('reply notifications (via addMessage)', () => {
 
     const ownerNotifications = await listNotificationsForUser(owner.id);
     expect(ownerNotifications).toHaveLength(1);
-    expect(ownerNotifications[0]?.message).toBe('New reply on "Printer jam"');
+    expect(ownerNotifications[0]?.message).toBe(`New reply on ${ticket.incidentNumber} "Printer jam"`);
     expect(ownerNotifications[0]?.type).toBe('reply');
 
     const watcherNotifications = await listNotificationsForUser(watcher.id);
@@ -170,7 +174,7 @@ describe('status-change notifications (via updateTicket)', () => {
 
     const notifications = await listNotificationsForUser(owner.id);
     expect(notifications).toHaveLength(1);
-    expect(notifications[0]?.message).toBe('Your ticket "Leaky faucet" has been resolved');
+    expect(notifications[0]?.message).toBe(`Your ticket ${ticket.incidentNumber} "Leaky faucet" has been resolved`);
     expect(notifications[0]?.type).toBe('status_changed');
   });
 
@@ -204,7 +208,7 @@ describe('status-change notifications (via updateTicket)', () => {
     const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id, kind: 'closed' } });
     expect(dms).toHaveLength(1);
     expect(dms[0]?.message).toBe(
-      `Your ticket has been closed. View it here: ${env.publicAppUrl}/t/${ticket.id}`,
+      `Your ticket has been closed. View it here: ${env.publicAppUrl}/t/${ticket.id} Need further help? Open a new ticket: ${env.publicAppUrl}`,
     );
   });
 
@@ -223,7 +227,7 @@ describe('status-change notifications (via updateTicket)', () => {
     const dms = await prisma.discordDm.findMany({ where: { ticketId: ticket.id, kind: 'resolved' } });
     expect(dms).toHaveLength(1);
     expect(dms[0]?.message).toBe(
-      `Your ticket has been resolved. View it here: ${env.publicAppUrl}/t/${ticket.id}`,
+      `Your ticket has been resolved. View it here: ${env.publicAppUrl}/t/${ticket.id} Need further help? Open a new ticket: ${env.publicAppUrl}`,
     );
   });
 
