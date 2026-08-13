@@ -47,6 +47,19 @@ export const updateWatchersSchema = z
 export type UpdateWatchersInput = z.infer<typeof updateWatchersSchema>;
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
 
+/** Discord snowflake IDs are numeric strings; empty string from a cleared form field means "unset". */
+const optionalChannelId = z
+  .string()
+  .regex(/^\d+$/)
+  .nullable()
+  .or(z.literal('').transform(() => null));
+
+export const updateDiscordSettingsSchema = z.object({
+  newTicketChannelId: optionalChannelId,
+  unassignedAlertChannelId: optionalChannelId,
+});
+export type UpdateDiscordSettingsInput = z.infer<typeof updateDiscordSettingsSchema>;
+
 export const createTagSchema = z.object({
   name: z.string().min(1).max(40),
   color: z

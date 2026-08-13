@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { BarChart3, Inbox, Tag as TagIcon, Ticket } from 'lucide-react';
+import { BarChart3, Inbox, Settings, Tag as TagIcon, Ticket } from 'lucide-react';
 import { getCurrentSession } from '@/lib/session';
 import { SignInButton } from '@/components/SignInButton';
 import { LogoutButton } from '@/components/LogoutButton';
@@ -60,6 +60,10 @@ export async function AppHeader() {
                 <Link href="/admin/tags" className={`${navLink} inline-flex items-center gap-1.5`}>
                   <TagIcon className="h-4 w-4" />
                   Tags
+                </Link>
+                <Link href="/admin/settings" className={`${navLink} inline-flex items-center gap-1.5`}>
+                  <Settings className="h-4 w-4" />
+                  Settings
                 </Link>
               </>
             )}
