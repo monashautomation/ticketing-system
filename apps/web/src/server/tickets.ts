@@ -394,7 +394,10 @@ export async function createTicket(
   });
 
   await writeAuditLog(userId, 'ticket.create', 'Ticket', ticket.id, input as Prisma.InputJsonValue);
-  await notifyNewTicketChannel(ticket);
+  // Deferred import: keeps env.ts's required-var validation out of the module load path for
+  // pure-function unit tests that never call createTicket.
+  const { env } = await import('@/lib/env');
+  await notifyNewTicketChannel(ticket, env.publicAppUrl);
 
   return ticket;
 }
@@ -482,7 +485,7 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
     source: 'discord',
     discordUserId: input.discordUserId,
   });
-  await notifyNewTicketChannel(ticket);
+  await notifyNewTicketChannel(ticket, baseUrl);
 
   if (owner.isDiscordPlaceholder) {
     const rawClaimToken = randomBytes(32).toString('hex');
@@ -503,7 +506,7 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
 
     const claimPath = `/link-discord/claim?token=${rawClaimToken}`;
     await notifyTicketCreated(
-      { id: ticket.id, incidentNumber: ticket.incidentNumber, createdBy: owner },
+      { id: ticket.id, incidentNumber: ticket.incidentNumber, title: ticket.title, createdBy: owner },
       `${baseUrl}${claimPath}`,
     );
 
@@ -525,7 +528,7 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
 
   const tokenPath = `/t/${ticket.id}?token=${rawToken}`;
   await notifyTicketCreated(
-    { id: ticket.id, incidentNumber: ticket.incidentNumber, createdBy: owner },
+    { id: ticket.id, incidentNumber: ticket.incidentNumber, title: ticket.title, createdBy: owner },
     `${baseUrl}${tokenPath}`,
   );
 

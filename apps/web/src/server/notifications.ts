@@ -86,6 +86,15 @@ function ticketLink(baseUrl: string, ticketId: string): string {
   return `${baseUrl}/t/${ticketId}`;
 }
 
+/**
+ * Discord-markdown header used to open every ticket-specific notification, DM or channel post,
+ * so incident number + title are always visible and the message doesn't read as plain, blend-in
+ * text in a busy channel.
+ */
+function ticketHeader(incidentNumber: string, title: string): string {
+  return `**${incidentNumber}**: ${title}`;
+}
+
 /** Queues a Discord DM for every recipient that has a linked Discord account. */
 async function queueDiscordDms(
   ticketId: string,
@@ -121,14 +130,14 @@ async function queueDiscordDms(
  * placeholder user only has a claim link, not a direct `/t/{id}` link, to view the ticket.
  */
 export async function notifyTicketCreated(
-  ticket: { id: string; incidentNumber: string; createdBy: RecipientUser },
+  ticket: { id: string; incidentNumber: string; title: string; createdBy: RecipientUser },
   link: string,
 ): Promise<void> {
   await queueDiscordDms(
     ticket.id,
     [ticket.createdBy],
     'ticket_created',
-    `Your ticket ${ticket.incidentNumber} has been created — view it here: ${link}`,
+    `${ticketHeader(ticket.incidentNumber, ticket.title)}\nYour ticket has been created. View it here: ${link}`,
   );
 }
 
@@ -150,19 +159,20 @@ export async function notifyReply(
     })),
   });
 
-  // Never include the reply body or ticket details in the DM -- link only.
+  // Never include the reply body in the DM -- header (incident number + title) + link only.
+  const header = ticketHeader(ticket.incidentNumber, ticket.title);
   await queueDiscordDms(
     ticket.id,
     recipients,
     'reply',
-    `Your ticket has a new reply — view it here: ${ticketLink(baseUrl, ticket.id)}`,
+    `${header}\nYour ticket has a new reply. View it here: ${ticketLink(baseUrl, ticket.id)}`,
   );
 
   await queueDiscordDms(
     ticket.id,
     assigneeOnlyRecipients(ticket, authorId),
     'assignee_updated',
-    `A ticket assigned to you has a new reply — view it here: ${ticketLink(baseUrl, ticket.id)}`,
+    `${header}\nA ticket assigned to you has a new reply. View it here: ${ticketLink(baseUrl, ticket.id)}`,
   );
 }
 
@@ -177,6 +187,7 @@ export async function notifyAttachmentAdded(
   baseUrl: string,
 ): Promise<void> {
   const recipients = ticketRecipients(ticket).filter((r) => r.id !== uploaderId);
+  const header = ticketHeader(ticket.incidentNumber, ticket.title);
   if (recipients.length > 0) {
     await prisma.notification.createMany({
       data: recipients.map((r) => ({
@@ -191,7 +202,7 @@ export async function notifyAttachmentAdded(
       ticket.id,
       recipients,
       'reply',
-      `Your ticket has a new attachment — view it here: ${ticketLink(baseUrl, ticket.id)}`,
+      `${header}\nYour ticket has a new attachment. View it here: ${ticketLink(baseUrl, ticket.id)}`,
     );
   }
 
@@ -199,7 +210,7 @@ export async function notifyAttachmentAdded(
     ticket.id,
     assigneeOnlyRecipients(ticket, uploaderId),
     'assignee_updated',
-    `A ticket assigned to you has a new attachment — view it here: ${ticketLink(baseUrl, ticket.id)}`,
+    `${header}\nA ticket assigned to you has a new attachment. View it here: ${ticketLink(baseUrl, ticket.id)}`,
   );
 }
 
@@ -222,18 +233,18 @@ function newTicketFooter(baseUrl: string): string {
   return ` Need further help? Open a new ticket: ${baseUrl}`;
 }
 
-function statusDmMessage(status: TicketStatus, baseUrl: string, ticketId: string): string | null {
+function statusDmMessage(status: TicketStatus, baseUrl: string, ticketId: string, header: string): string | null {
   const link = ticketLink(baseUrl, ticketId);
   if (status === 'pending') return null;
-  if (status === 'closed') return `Your ticket has been closed. View it here: ${link}${newTicketFooter(baseUrl)}`;
-  if (status === 'resolved') return `Your ticket has been resolved. View it here: ${link}${newTicketFooter(baseUrl)}`;
-  return `Your ticket has been updated. View it here: ${link}`;
+  if (status === 'closed') return `${header}\nYour ticket has been closed. View it here: ${link}${newTicketFooter(baseUrl)}`;
+  if (status === 'resolved') return `${header}\nYour ticket has been resolved. View it here: ${link}${newTicketFooter(baseUrl)}`;
+  return `${header}\nYour ticket has been updated. View it here: ${link}`;
 }
 
-function assigneeStatusDmMessage(status: TicketStatus, baseUrl: string, ticketId: string): string | null {
+function assigneeStatusDmMessage(status: TicketStatus, baseUrl: string, ticketId: string, header: string): string | null {
   const link = ticketLink(baseUrl, ticketId);
   if (status === 'pending') return null;
-  return `A ticket assigned to you has been updated — view it here: ${link}`;
+  return `${header}\nA ticket assigned to you has been updated. View it here: ${link}`;
 }
 
 export async function notifyStatusChanged(
@@ -244,6 +255,7 @@ export async function notifyStatusChanged(
 ): Promise<void> {
   const label = STATUS_LABELS[newStatus];
   const recipients = ticketRecipients(ticket).filter((r) => r.id !== actorId);
+  const header = ticketHeader(ticket.incidentNumber, ticket.title);
 
   if (recipients.length > 0 && label) {
     await prisma.notification.createMany({
@@ -258,12 +270,12 @@ export async function notifyStatusChanged(
 
   const kind = newStatus === 'closed' ? 'closed' : newStatus === 'resolved' ? 'resolved' : 'status_updated';
 
-  const dmMessage = statusDmMessage(newStatus, baseUrl, ticket.id);
+  const dmMessage = statusDmMessage(newStatus, baseUrl, ticket.id, header);
   if (dmMessage && recipients.length > 0) {
     await queueDiscordDms(ticket.id, recipients, kind, dmMessage);
   }
 
-  const assigneeMessage = assigneeStatusDmMessage(newStatus, baseUrl, ticket.id);
+  const assigneeMessage = assigneeStatusDmMessage(newStatus, baseUrl, ticket.id, header);
   if (assigneeMessage) {
     await queueDiscordDms(ticket.id, assigneeOnlyRecipients(ticket, actorId), 'assignee_updated', assigneeMessage);
   }
@@ -275,7 +287,7 @@ export async function notifyStatusChanged(
  * updateTicket right after the status write, passing the ticket's state *before* the update.
  */
 export async function handlePendingTransition(
-  ticket: { id: string; status: TicketStatus; createdBy: RecipientUser },
+  ticket: { id: string; incidentNumber: string; title: string; status: TicketStatus; createdBy: RecipientUser },
   previousStatus: TicketStatus,
   baseUrl: string,
 ): Promise<void> {
@@ -301,7 +313,7 @@ export async function handlePendingTransition(
     ticket.id,
     [ticket.createdBy],
     'pending_notice',
-    `Your ticket is awaiting additional information from you — please reply here: ${ticketLink(baseUrl, ticket.id)}`,
+    `${ticketHeader(ticket.incidentNumber, ticket.title)}\nYour ticket is awaiting additional information from you. Please reply here: ${ticketLink(baseUrl, ticket.id)}`,
   );
 }
 
@@ -359,7 +371,7 @@ export async function queueActiveStatusReminders(baseUrl: string): Promise<numbe
                 discordUserId: a.discordId,
                 ticketId: ticket.id,
                 kind: 'assignee_idle_reminder' as const,
-                message: `A ticket assigned to you has been sitting for over 24 hours without an update — view it here: ${ticketLink(baseUrl, ticket.id)}`,
+                message: `${ticketHeader(ticket.incidentNumber, ticket.title)}\nA ticket assigned to you has been sitting for over 24 hours without an update. View it here: ${ticketLink(baseUrl, ticket.id)}`,
               })),
             }),
           ]
@@ -375,16 +387,24 @@ export async function queueActiveStatusReminders(baseUrl: string): Promise<numbe
 }
 
 /**
- * Posts a "New ticket: {title}" message to the admin-configured channel, if one is set.
- * Title only -- no description/priority/reporter, per the no-ticket-details-outside-app rule.
+ * Posts a new-ticket message to the admin-configured channel, if one is set. Incident number +
+ * title + link to the specific ticket -- no description/priority/reporter, per the
+ * no-ticket-details-outside-app rule.
  */
-export async function notifyNewTicketChannel(ticket: { title: string }): Promise<void> {
+export async function notifyNewTicketChannel(
+  ticket: { id: string; incidentNumber: string; title: string },
+  baseUrl: string,
+): Promise<void> {
   const settings = await prisma.discordSettings.findUnique({ where: { id: 'singleton' } });
   const channelId = settings?.newTicketChannelId;
   if (!channelId) return;
 
   await prisma.discordChannelMessage.create({
-    data: { channelId, kind: 'ticket_created', message: `New ticket: ${ticket.title}` },
+    data: {
+      channelId,
+      kind: 'ticket_created',
+      message: `New ticket opened\n${ticketHeader(ticket.incidentNumber, ticket.title)}\n${ticketLink(baseUrl, ticket.id)}`,
+    },
   });
 }
 
@@ -418,7 +438,7 @@ export async function queueUnassignedBacklogAlert(baseUrl: string): Promise<void
     data: {
       channelId,
       kind: 'unassigned_backlog',
-      message: `${count} open ticket${count === 1 ? '' : 's'} have no assignee — ${baseUrl}/admin`,
+      message: `${count} open ticket${count === 1 ? '' : 's'} have no assignee. View the ticketing system: ${baseUrl}/admin`,
     },
   });
 }
@@ -444,7 +464,7 @@ export async function queuePendingEscalationDms(baseUrl: string): Promise<number
         discordUserId: t.createdBy.discordId as string,
         ticketId: t.id,
         kind: 'pending_escalation' as const,
-        message: `Your ticket is still awaiting a response and may be closed if we don't hear back soon — please reply here: ${ticketLink(baseUrl, t.id)}`,
+        message: `${ticketHeader(t.incidentNumber, t.title)}\nYour ticket is still awaiting a response and may be closed if we don't hear back soon. Please reply here: ${ticketLink(baseUrl, t.id)}`,
       })),
     }),
     prisma.ticket.updateMany({
@@ -476,7 +496,7 @@ export async function queueSlaBreachAlerts(baseUrl: string): Promise<number> {
 
   for (const ticket of tickets) {
     const link = ticketLink(baseUrl, ticket.id);
-    const message = `SLA breached on ${ticket.incidentNumber} "${ticket.title}" — view it here: ${link}`;
+    const message = `${ticketHeader(ticket.incidentNumber, ticket.title)}\nSLA breached. View it here: ${link}`;
     const withDiscord = ticket.assignees.filter(
       (a): a is RecipientUser & { discordId: string } => a.discordId !== null,
     );
