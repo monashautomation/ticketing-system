@@ -33,7 +33,9 @@ ENV DATABASE_URL="postgresql://build:build@localhost:5432/build" \
     S3_ENDPOINT="http://localhost:9000" \
     S3_BUCKET="build-placeholder" \
     S3_ACCESS_KEY_ID="build-placeholder" \
-    S3_SECRET_ACCESS_KEY="build-placeholder"
+    S3_SECRET_ACCESS_KEY="build-placeholder" \
+    DIRECTORY_SERVICE_API_URL="https://directory.invalid" \
+    DIRECTORY_SERVICE_API_KEY="build-placeholder"
 RUN pnpm --filter web build
 
 FROM base AS runner
