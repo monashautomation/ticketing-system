@@ -53,3 +53,11 @@ export async function getDownloadUrl(storageKey: string, fileName: string): Prom
 export async function deleteObject(storageKey: string): Promise<void> {
   await s3Internal.send(new DeleteObjectCommand({ Bucket: env.s3Bucket, Key: storageKey }));
 }
+
+/** Fetches an object's bytes directly (e.g. for server-side OCR) rather than presigning a URL. */
+export async function getObjectBuffer(storageKey: string): Promise<Buffer> {
+  const result = await s3Internal.send(new GetObjectCommand({ Bucket: env.s3Bucket, Key: storageKey }));
+  if (!result.Body) throw new Error(`Empty object body for ${storageKey}`);
+  const bytes = await result.Body.transformToByteArray();
+  return Buffer.from(bytes);
+}

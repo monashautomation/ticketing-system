@@ -13,7 +13,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      data: { ticketId: ticket.id, isNewUser, url: `${env.publicAppUrl}${path}` },
+      data: {
+        ticketId: ticket.id,
+        incidentNumber: ticket.incidentNumber,
+        isNewUser,
+        url: `${env.publicAppUrl}${path}`,
+      },
     });
   } catch (error) {
     return handleApiError(error);

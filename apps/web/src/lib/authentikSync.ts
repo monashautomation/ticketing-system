@@ -1,6 +1,8 @@
 import { resolveRole } from '@ticketing/shared';
 import { prisma } from '@ticketing/db';
 import { env } from './env';
+import { lookupDirectoryUserByEmail } from './directoryService';
+import { logger } from './logger';
 
 interface AuthentikGroup {
   name: string;
@@ -76,4 +78,37 @@ export async function syncAuthentikUsers(): Promise<{ upserted: number }> {
   }
 
   return { upserted };
+}
+
+/**
+ * Hourly sweep: refreshes every real (non-placeholder) user's `discordId` from directory-service
+ * by email, overwriting on drift -- directory-service is the source of truth for Discord linkage,
+ * not this table. Runs on its own cadence, decoupled from syncAuthentikUsers's 15-min loop
+ * (directory-service has no bulk-list endpoint, so this is one HTTP call per user regardless).
+ * Placeholder users are skipped -- their email is a synthetic `discord-{id}@placeholder.invalid`
+ * that will never match a directory-service record.
+ */
+export async function refreshDiscordIdsFromDirectory(): Promise<{ checked: number; updated: number }> {
+  const users = await prisma.user.findMany({
+    where: { isDiscordPlaceholder: false },
+    select: { id: true, email: true, discordId: true },
+  });
+
+  let updated = 0;
+  for (const user of users) {
+    const directoryUser = await lookupDirectoryUserByEmail(user.email);
+    const newDiscordId = directoryUser?.discordUserId ?? null;
+    if (newDiscordId === user.discordId) continue;
+
+    try {
+      await prisma.user.update({ where: { id: user.id }, data: { discordId: newDiscordId } });
+      updated += 1;
+    } catch (error) {
+      // Most likely a unique-constraint clash (another row already holds newDiscordId, e.g.
+      // stale data) -- log and move on rather than aborting the whole sweep over one user.
+      logger.error(`Failed to update discordId for user ${user.id}`, error);
+    }
+  }
+
+  return { checked: users.length, updated };
 }

@@ -16,9 +16,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     const body = createTagSchema.parse(await request.json());
-    const tag = await createTag(body);
+    const tag = await createTag(body, session.user.id);
     return NextResponse.json({ success: true, data: tag }, { status: 201 });
   } catch (error) {
     return handleApiError(error);

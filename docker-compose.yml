@@ -74,6 +74,8 @@ services:
       ADMIN_GROUPS: ${ADMIN_GROUPS:-ticketing-admins}
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-internal-secret}
       UPTIME_KUMA_WEBHOOK_SECRET: ${UPTIME_KUMA_WEBHOOK_SECRET:-dev-kuma-secret}
+      DIRECTORY_SERVICE_API_URL: ${DIRECTORY_SERVICE_API_URL:-}
+      DIRECTORY_SERVICE_API_KEY: ${DIRECTORY_SERVICE_API_KEY:-}
       # Must be browser-reachable: presigned URLs are handed to the client, not fetched server-side.
       S3_ENDPOINT: ${S3_ENDPOINT:-http://localhost:9000}
       # Used for server-side calls (delete, cleanup) which run inside the web container.

@@ -6,9 +6,13 @@ import {
   claimDiscordAccount,
   createTicket,
   createTicketFromDiscord,
+  createTicketShareLink,
   getTicketMetrics,
   listTicketsForAdminQueue,
   listTicketsForUser,
+  previewTicketShareLink,
+  redeemTicketShareLink,
+  resolveSearchTokensToFilters,
   updateTicket,
   verifyTicketToken,
 } from './tickets';
@@ -312,7 +316,11 @@ describe('updateTicket', () => {
     expect(updated.priority).toBe('urgent');
     expect(updated.assignees.map((a) => a.id)).toEqual([admin.id]);
 
-    const auditEntries = await prisma.auditLog.findMany({ where: { targetId: ticket.id } });
+    // ticket.create was already logged when the ticket was set up above; this update adds a
+    // second entry for the same ticket.
+    const auditEntries = await prisma.auditLog.findMany({
+      where: { targetId: ticket.id, action: 'ticket.update' },
+    });
     expect(auditEntries).toHaveLength(1);
     expect(auditEntries[0]?.action).toBe('ticket.update');
   });
@@ -470,6 +478,121 @@ describe('listTicketsForAdminQueue', () => {
     const byAssignee = await listTicketsForAdminQueue({ assigneeId: admin.id });
     expect(byAssignee.map((t) => t.id)).toEqual([overdueTicket.id]);
   });
+
+  it('filters by createdById, watcherId, and type', async () => {
+    const owner = await createTestUser({ name: 'Submitter One' });
+    const otherOwner = await createTestUser({ name: 'Submitter Two', email: 'other-owner@test.local' });
+    const watcher = await createTestUser({ name: 'Watcher', email: 'watcher-queue@test.local' });
+
+    const ccdTicket = await createTicket(owner.id, 'user', {
+      title: 'CCd bug report',
+      description: 'x',
+      priority: 'normal',
+      type: 'bug',
+      ccUserIds: [watcher.id],
+    });
+    await createTicket(otherOwner.id, 'user', {
+      title: 'Unrelated feature request',
+      description: 'y',
+      priority: 'normal',
+      type: 'feature',
+    });
+
+    expect((await listTicketsForAdminQueue({ createdById: [owner.id] })).map((t) => t.id)).toEqual([ccdTicket.id]);
+    expect((await listTicketsForAdminQueue({ watcherId: [watcher.id] })).map((t) => t.id)).toEqual([ccdTicket.id]);
+    expect((await listTicketsForAdminQueue({ type: 'bug' })).map((t) => t.id)).toEqual([ccdTicket.id]);
+  });
+
+  it('full-text searches title, description, and message bodies, ranked by relevance', async () => {
+    const owner = await createTestUser();
+    const admin = await createTestUser({ name: 'Search Admin', email: 'search-admin@test.local', role: 'admin' });
+
+    const titleMatch = await createTicket(owner.id, 'user', {
+      title: 'Printer spontaneously combusted',
+      description: 'no further detail',
+      priority: 'normal',
+      type: 'bug',
+    });
+    const descriptionMatch = await createTicket(owner.id, 'user', {
+      title: 'Office equipment issue',
+      description: 'the printer is spontaneously combusting again',
+      priority: 'normal',
+      type: 'bug',
+    });
+    const messageMatch = await createTicket(owner.id, 'user', {
+      title: 'Follow-up needed',
+      description: 'see thread',
+      priority: 'normal',
+      type: 'other',
+    });
+    await addMessage(messageMatch.id, admin.id, {
+      body: 'Confirmed: the printer combusted spontaneously this morning',
+      isInternalNote: false,
+    });
+    await createTicket(owner.id, 'user', {
+      title: 'Totally unrelated',
+      description: 'nothing to see here',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    const results = await listTicketsForAdminQueue({ search: 'printer combusted' });
+    const resultIds = results.map((t) => t.id);
+    expect(resultIds).toEqual(expect.arrayContaining([titleMatch.id, descriptionMatch.id, messageMatch.id]));
+    expect(resultIds).toHaveLength(3);
+    // Title match should rank at or above description/message matches for the same terms.
+    expect(resultIds[0]).toBe(titleMatch.id);
+  });
+});
+
+describe('resolveSearchTokensToFilters', () => {
+  it('resolves submitter/cced/assigned/tag tokens to ids and status/priority/type tokens directly', async () => {
+    const submitter = await createTestUser({ name: 'Jane Submitter', email: 'jane-submitter@test.local' });
+    const ccdUser = await createTestUser({ name: 'Casey Cc', email: 'casey-cc@test.local' });
+    const assignee = await createTestUser({ name: 'Alex Assignee', email: 'alex-assignee@test.local', role: 'admin' });
+    const tag = await prisma.tag.create({ data: { name: 'infra-token-test', color: '#654321' } });
+
+    const filters = await resolveSearchTokensToFilters([
+      { type: 'submitter', value: 'Jane Submitter' },
+      { type: 'cced', value: 'Casey Cc' },
+      { type: 'assigned', value: 'Alex Assignee' },
+      { type: 'tag', value: 'infra-token-test' },
+      { type: 'status', value: 'pending' },
+      { type: 'priority', value: 'urgent' },
+      { type: 'type', value: 'bug' },
+      { type: 'status', value: 'not-a-real-status' },
+    ]);
+
+    expect(filters.createdById).toEqual([submitter.id]);
+    expect(filters.watcherId).toEqual([ccdUser.id]);
+    expect(filters.assigneeId).toEqual([assignee.id]);
+    expect(filters.tagId).toEqual([tag.id]);
+    expect(filters.status).toBe('pending');
+    expect(filters.priority).toBe('urgent');
+    expect(filters.type).toBe('bug');
+  });
+
+  it('feeds resolved token filters end-to-end into listTicketsForAdminQueue', async () => {
+    const submitter = await createTestUser({ name: 'Token Owner', email: 'token-owner@test.local' });
+    const otherOwner = await createTestUser({ name: 'Other Owner', email: 'other-owner-2@test.local' });
+
+    const matching = await createTicket(submitter.id, 'user', {
+      title: 'Matches by submitter token',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+    await createTicket(otherOwner.id, 'user', {
+      title: 'Does not match',
+      description: 'y',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    const filters = await resolveSearchTokensToFilters([{ type: 'submitter', value: 'Token Owner' }]);
+    const results = await listTicketsForAdminQueue(filters);
+    expect(results.map((t) => t.id)).toEqual([matching.id]);
+  });
 });
 
 describe('getTicketMetrics', () => {
@@ -495,5 +618,82 @@ describe('getTicketMetrics', () => {
     expect(metrics.avgResolutionMs).not.toBeNull();
     expect(metrics.byPriority.normal).toBe(1);
     expect(metrics.byPriority.high).toBe(1);
+  });
+});
+
+describe('ticket share links', () => {
+  it('CCs the redeeming user as a watcher and is reusable for a second person', async () => {
+    const owner = await createTestUser();
+    const friend = await createTestUser({ name: 'Friend', email: 'friend@test.local' });
+    const other = await createTestUser({ name: 'Other', email: 'other-cc@test.local' });
+
+    const ticket = await createTicket(owner.id, 'user', {
+      title: 'Shared ticket',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    const { path } = await createTicketShareLink(ticket.id, owner.id);
+    const token = tokenFromPath(path);
+
+    expect(await previewTicketShareLink(token, ticket.id)).toEqual({ ticketTitle: ticket.title });
+
+    await redeemTicketShareLink(token, ticket.id, friend.id);
+    let updated = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticket.id },
+      include: { watchers: true },
+    });
+    expect(updated.watchers.map((w) => w.id)).toEqual([friend.id]);
+
+    await redeemTicketShareLink(token, ticket.id, other.id);
+    updated = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticket.id },
+      include: { watchers: true },
+    });
+    expect(updated.watchers.map((w) => w.id).sort()).toEqual([friend.id, other.id].sort());
+  });
+
+  it('is a no-op when the redeeming user already has access', async () => {
+    const owner = await createTestUser();
+    const ticket = await createTicket(owner.id, 'user', {
+      title: 'Own ticket',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    const { path } = await createTicketShareLink(ticket.id, owner.id);
+    await redeemTicketShareLink(tokenFromPath(path), ticket.id, owner.id);
+
+    const updated = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticket.id },
+      include: { watchers: true },
+    });
+    expect(updated.watchers).toHaveLength(0);
+  });
+
+  it('rejects an expired or mismatched-ticket token', async () => {
+    const owner = await createTestUser();
+    const friend = await createTestUser({ name: 'Friend', email: 'friend2@test.local' });
+
+    const ticketA = await createTicket(owner.id, 'user', {
+      title: 'A',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+    const ticketB = await createTicket(owner.id, 'user', {
+      title: 'B',
+      description: 'x',
+      priority: 'normal',
+      type: 'other',
+    });
+
+    const { path } = await createTicketShareLink(ticketA.id, owner.id);
+    const token = tokenFromPath(path);
+
+    expect(await previewTicketShareLink(token, ticketB.id)).toBeNull();
+    await expect(redeemTicketShareLink(token, ticketB.id, friend.id)).rejects.toThrow();
   });
 });

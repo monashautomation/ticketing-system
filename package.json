@@ -8,6 +8,7 @@
   "scripts": {
     "dev:web": "pnpm --filter web dev",
     "dev:bot": "pnpm --filter bot dev",
+    "dev": "mprocs",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
@@ -20,6 +21,7 @@
     "@typescript-eslint/eslint-plugin": "^8.19.0",
     "@typescript-eslint/parser": "^8.19.0",
     "eslint": "^9.17.0",
+    "mprocs": "^0.9.6",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2"
   }
