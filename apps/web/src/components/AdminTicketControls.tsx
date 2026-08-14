@@ -77,6 +77,7 @@ export function AdminTicketControls({
 }: AdminTicketControlsProps) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [slaDueAt, setSlaDueAt] = useState(toDatetimeLocal(currentSlaDueAt));
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>(currentTagIds);
   const [selectedAssignees, setSelectedAssignees] = useState<AdminOption[]>(currentAssignees);
   const [assigneeQuery, setAssigneeQuery] = useState('');
@@ -111,6 +112,11 @@ export function AdminTicketControls({
     });
     setIsSaving(false);
     router.refresh();
+  }
+
+  function commitSlaDueAt() {
+    if (slaDueAt === toDatetimeLocal(currentSlaDueAt)) return;
+    update({ slaDueAt: slaDueAt ? new Date(slaDueAt).toISOString() : null });
   }
 
   function toggleTag(tagId: string) {
@@ -217,11 +223,13 @@ export function AdminTicketControls({
           <input
             type="datetime-local"
             className={inputSm}
-            defaultValue={toDatetimeLocal(currentSlaDueAt)}
+            value={slaDueAt}
             disabled={isSaving || isClosed}
-            onChange={(e) =>
-              update({ slaDueAt: e.target.value ? new Date(e.target.value).toISOString() : null })
-            }
+            onChange={(e) => setSlaDueAt(e.target.value)}
+            onBlur={commitSlaDueAt}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
           />
         </label>
 
