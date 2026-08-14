@@ -16,6 +16,7 @@ import {
 } from '@ticketing/shared';
 import { AppError, NotFoundError } from '@/lib/errors';
 import { writeAuditLog } from '@/server/audit';
+import { recordTicketHistory, type TicketHistoryEntryInput } from '@/server/ticketHistory';
 import {
   handleActiveStatusTransition,
   handlePendingTransition,
@@ -263,6 +264,7 @@ export async function getTicketOr404(ticketId: string) {
       watchers: true,
       attachments: { orderBy: { createdAt: 'asc' }, include: { uploadedBy: true } },
       messages: { orderBy: { createdAt: 'asc' }, include: { author: true } },
+      history: { orderBy: { createdAt: 'desc' }, include: { actor: true } },
     },
   });
   if (!ticket) throw new NotFoundError('Ticket not found');
@@ -663,10 +665,75 @@ function buildResolutionSystemMessage(
   return `Ticket resolved: ${resolutionMessage ?? 'No reason given'}`;
 }
 
+interface PreviousTicketState {
+  status: TicketStatus;
+  priority: TicketPriority;
+  slaDueAt: Date | null;
+  tags: { id: string; name: string }[];
+  watchers: { id: string; name: string }[];
+}
+
+/** Diffs the pre-update ticket state against the patch (and the post-update relations, for
+ * added tags/watchers' names) into flat TicketHistory rows -- one per discrete change. */
+function buildTicketHistoryEntries(
+  previous: PreviousTicketState,
+  input: UpdateTicketInput,
+  updated: { tags: { id: string; name: string }[]; watchers: { id: string; name: string }[] },
+): TicketHistoryEntryInput[] {
+  const entries: TicketHistoryEntryInput[] = [];
+
+  if (input.status && input.status !== previous.status) {
+    entries.push({ field: 'status', action: 'changed', fromValue: previous.status, toValue: input.status });
+  }
+
+  if (input.priority && input.priority !== previous.priority) {
+    entries.push({ field: 'priority', action: 'changed', fromValue: previous.priority, toValue: input.priority });
+  }
+
+  if (input.slaDueAt !== undefined) {
+    const nextSlaDueAt = input.slaDueAt ? new Date(input.slaDueAt) : null;
+    const prevIso = previous.slaDueAt?.toISOString() ?? null;
+    const nextIso = nextSlaDueAt?.toISOString() ?? null;
+    if (prevIso !== nextIso) {
+      entries.push({ field: 'sla', action: 'changed', fromValue: prevIso, toValue: nextIso });
+    }
+  }
+
+  if (input.tagIds !== undefined) {
+    const previousIds = new Set(previous.tags.map((t) => t.id));
+    const nextIds = new Set(input.tagIds);
+    for (const tag of updated.tags) {
+      if (!previousIds.has(tag.id)) entries.push({ field: 'tag', action: 'added', toValue: tag.name });
+    }
+    for (const tag of previous.tags) {
+      if (!nextIds.has(tag.id)) entries.push({ field: 'tag', action: 'removed', fromValue: tag.name });
+    }
+  }
+
+  if (input.watcherIds !== undefined) {
+    const previousIds = new Set(previous.watchers.map((w) => w.id));
+    const nextIds = new Set(input.watcherIds);
+    for (const watcher of updated.watchers) {
+      if (!previousIds.has(watcher.id)) entries.push({ field: 'watcher', action: 'added', toValue: watcher.name });
+    }
+    for (const watcher of previous.watchers) {
+      if (!nextIds.has(watcher.id)) entries.push({ field: 'watcher', action: 'removed', fromValue: watcher.name });
+    }
+  }
+
+  return entries;
+}
+
 export async function updateTicket(ticketId: string, input: UpdateTicketInput, actorId: string) {
   const previous = await prisma.ticket.findUnique({
     where: { id: ticketId },
-    select: { status: true },
+    select: {
+      status: true,
+      priority: true,
+      slaDueAt: true,
+      tags: { select: { id: true, name: true } },
+      watchers: { select: { id: true, name: true } },
+    },
   });
   if (!previous) throw new NotFoundError('Ticket not found');
 
@@ -713,6 +780,7 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
   });
 
   await writeAuditLog(actorId, 'ticket.update', 'Ticket', ticketId, input as Prisma.InputJsonValue);
+  await recordTicketHistory(ticketId, actorId, buildTicketHistoryEntries(previous, input, ticket));
 
   if (input.status && input.status !== previous.status) {
     if (RESOLVED_STATUSES.includes(input.status)) {
