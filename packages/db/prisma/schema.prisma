@@ -103,6 +103,7 @@ model User {
   uploadedAttachments TicketAttachment[]
   notifications   Notification[]
   ticketShareLinksCreated TicketShareLink[]
+  ticketHistoryEntries    TicketHistory[]
 
   @@map("users")
 }
@@ -202,6 +203,7 @@ model Ticket {
   assignees     User[]              @relation("TicketAssignees")
   notifications Notification[]
   discordDms    DiscordDm[]
+  history       TicketHistory[]
 
   @@index([status])
   @@index([createdById])
@@ -392,6 +394,40 @@ model MaintenanceEvent {
   @@index([status])
   @@index([kumaMonitorId])
   @@map("maintenance_events")
+}
+
+enum TicketHistoryField {
+  status
+  priority
+  sla
+  tag
+  watcher
+  attachment
+}
+
+enum TicketHistoryAction {
+  changed
+  added
+  removed
+}
+
+/// User-facing ticket timeline, distinct from AuditLog (which is generic/internal and never
+/// rendered). One row per discrete change -- a single updateTicket() call can emit several
+/// rows (e.g. a tag added and priority changed in the same PATCH each get their own row).
+model TicketHistory {
+  id        String              @id @default(cuid())
+  ticketId  String
+  ticket    Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actorId   String?
+  actor     User?               @relation(fields: [actorId], references: [id])
+  field     TicketHistoryField
+  action    TicketHistoryAction
+  fromValue String?
+  toValue   String?
+  createdAt DateTime            @default(now())
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_history")
 }
 
 model AuditLog {
