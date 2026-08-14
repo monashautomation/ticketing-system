@@ -105,6 +105,7 @@ export function TicketAttachments({
       <ul className="divide-y divide-border">
         {attachments.map((attachment, index) => {
           const isDeleting = deletingId === attachment.id;
+          const isImage = attachment.mimeType.startsWith('image/');
           return (
             <li
               key={attachment.id}
@@ -113,9 +114,22 @@ export function TicketAttachments({
             >
               <a
                 href={`/api/attachments/${attachment.id}`}
-                className="truncate text-text transition-colors hover:text-accent"
+                target={isImage ? '_blank' : undefined}
+                rel={isImage ? 'noopener noreferrer' : undefined}
+                className="flex min-w-0 items-center gap-2 text-text transition-colors hover:text-accent"
               >
-                {attachment.fileName}
+                {isImage && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={`/api/attachments/${attachment.id}`}
+                    alt={attachment.fileName}
+                    width={40}
+                    height={40}
+                    loading="lazy"
+                    className="h-10 w-10 shrink-0 rounded border border-border object-cover"
+                  />
+                )}
+                <span className="truncate">{attachment.fileName}</span>
               </a>
               <div className="flex items-center gap-3 text-text-secondary">
                 <span>{formatBytes(attachment.sizeBytes)}</span>

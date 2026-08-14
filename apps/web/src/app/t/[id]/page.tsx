@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { getCurrentSession } from '@/lib/session';
 import { canViewTicket, getTicketOr404, isOverdue, verifyTicketToken } from '@/server/tickets';
 import { markTicketNotificationsRead } from '@/server/notifications';
@@ -10,6 +10,7 @@ import { AdminTicketControls } from '@/components/AdminTicketControls';
 import { TicketAttachments } from '@/components/TicketAttachments';
 import { TicketTitleEditor } from '@/components/TicketTitleEditor';
 import { CcEditor } from '@/components/CcEditor';
+import { ShareTicketButton } from '@/components/ShareTicketButton';
 import { backLink, badgeDanger, mutedText, page } from '@/lib/styles';
 import { StatusPill } from '@/lib/ticketStatus';
 import { PriorityPill } from '@/lib/ticketPriority';
@@ -24,15 +25,21 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
   const { id } = await params;
   const { token } = await searchParams;
 
-  const ticket = await getTicketOr404(id).catch(() => null);
-  if (!ticket) notFound();
-
   const session = await getCurrentSession();
   const user = session
     ? { id: session.user.id, role: session.user.role as 'user' | 'admin' }
     : null;
 
   const hasTokenAccess = token ? await verifyTicketToken(id, token) : false;
+
+  if (!user && !hasTokenAccess) {
+    const originalPath = `/t/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    redirect(`/?callbackUrl=${encodeURIComponent(originalPath)}`);
+  }
+
+  const ticket = await getTicketOr404(id).catch(() => null);
+  if (!ticket) notFound();
+
   if (!hasTokenAccess && !canViewTicket(ticket, user)) notFound();
 
   if (user) await markTicketNotificationsRead(id, user.id);
@@ -51,6 +58,8 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
         ← Back to tickets
       </Link>
 
+      <p className={`mb-1 font-mono text-xs ${mutedText}`}>{ticket.incidentNumber}</p>
+
       <div className={`mb-6 flex items-start justify-between gap-4 ${isClosed ? 'opacity-60' : ''}`}>
         {isAdmin ? (
           <TicketTitleEditor
@@ -64,7 +73,10 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
             <p className={`mt-1 ${mutedText}`}>{ticket.description}</p>
           </div>
         )}
-        <StatusPill status={ticket.status} />
+        <div className="flex shrink-0 items-center gap-3">
+          {(isAdmin || isOwner) && <ShareTicketButton ticketId={ticket.id} />}
+          <StatusPill status={ticket.status} />
+        </div>
       </div>
 
       <p className={`mb-3 ${mutedText} ${isClosed ? 'opacity-60' : ''}`}>

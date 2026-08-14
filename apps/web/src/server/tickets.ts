@@ -1,27 +1,37 @@
 import { randomBytes, createHash } from 'node:crypto';
-import { prisma, Prisma } from '@ticketing/db';
+import { prisma, Prisma, type User } from '@ticketing/db';
 import {
   CLOSE_REASON_LABELS,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  TICKET_TYPES,
   type CreateInternalTicketInput,
   type CreateMessageInput,
   type CreateTicketInput,
+  type SearchToken,
   type TicketPriority,
   type TicketStatus,
+  type TicketType,
   type UpdateTicketInput,
 } from '@ticketing/shared';
 import { AppError, NotFoundError } from '@/lib/errors';
+import { writeAuditLog } from '@/server/audit';
 import {
+  handleActiveStatusTransition,
   handlePendingTransition,
+  notifyNewTicketChannel,
   notifyReply,
   notifyStatusChanged,
   notifyTicketCreated,
 } from '@/server/notifications';
 import { publishTicketMessage } from '@/server/ticket-events';
+import { lookupDirectoryUserByDiscordUsername } from '@/lib/directoryService';
 
 const TICKET_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const DISCORD_CLAIM_TTL_MS = 1000 * 60 * 30; // 30 minutes
+const SHARE_LINK_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
-const RESOLVED_STATUSES: readonly TicketStatus[] = ['resolved', 'closed'];
+export const RESOLVED_STATUSES: readonly TicketStatus[] = ['resolved', 'closed'];
 
 export function isOverdue(ticket: { slaDueAt: Date | null; status: string }): boolean {
   if (!ticket.slaDueAt) return false;
@@ -32,10 +42,20 @@ export function isOverdue(ticket: { slaDueAt: Date | null; status: string }): bo
 export interface TicketQueueFilters {
   status?: TicketStatus;
   priority?: TicketPriority;
-  assigneeId?: string;
-  tagId?: string;
+  type?: TicketType;
+  /** Array form supports multiple `assigned:`/`tag:` search tokens (OR'd together). */
+  assigneeId?: string | string[];
+  tagId?: string | string[];
+  createdById?: string[];
+  watcherId?: string[];
   overdueOnly?: boolean;
+  /** Free text matched against title/description/message bodies/OCR'd attachment text. */
   search?: string;
+}
+
+function toArray<T>(value: T | T[] | undefined): T[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 const ACTIVE_STATUS_GROUPS: readonly TicketStatus[] = ['open', 'escalated', 'pending', 'in_progress'];
@@ -65,6 +85,25 @@ function hashToken(token: string): string {
 }
 
 /**
+ * Atomically increments (creating if absent) the current year's row in
+ * TicketIncidentCounter and returns the next "INC-YYYY-NNNNNN" ref. Must run inside
+ * the same $transaction as the ticket create it backs, so a rolled-back ticket create
+ * doesn't leave the counter incremented and a number burned.
+ */
+async function nextIncidentNumber(tx: Prisma.TransactionClient): Promise<string> {
+  const year = new Date().getFullYear();
+  const rows = await tx.$queryRaw<{ lastValue: number }[]>`
+    INSERT INTO "ticket_incident_counters" ("year", "lastValue")
+    VALUES (${year}, 1)
+    ON CONFLICT ("year") DO UPDATE SET "lastValue" = "ticket_incident_counters"."lastValue" + 1
+    RETURNING "lastValue"
+  `;
+  const row = rows[0];
+  if (!row) throw new Error('Failed to allocate incident number');
+  return `INC-${year}-${String(row.lastValue).padStart(6, '0')}`;
+}
+
+/**
  * Always scoped to tickets the user submitted or is cc'd on -- admins included. Admins reach
  * every ticket through listTicketsForAdminQueue (the separate admin queue page), never here.
  */
@@ -81,21 +120,137 @@ export async function listTicketsForAdminQueue(filters: TicketQueueFilters = {})
   const where: Prisma.TicketWhereInput = {};
   if (filters.status) where.status = filters.status;
   if (filters.priority) where.priority = filters.priority;
-  if (filters.assigneeId) where.assignees = { some: { id: filters.assigneeId } };
-  if (filters.tagId) where.tags = { some: { id: filters.tagId } };
-  if (filters.search) {
-    where.title = { contains: filters.search, mode: 'insensitive' };
+  if (filters.type) where.type = filters.type;
+
+  const assigneeIds = toArray(filters.assigneeId);
+  if (assigneeIds.length > 0) where.assignees = { some: { id: { in: assigneeIds } } };
+
+  const tagIds = toArray(filters.tagId);
+  if (tagIds.length > 0) where.tags = { some: { id: { in: tagIds } } };
+
+  if (filters.createdById && filters.createdById.length > 0) {
+    where.createdById = { in: filters.createdById };
   }
+  if (filters.watcherId && filters.watcherId.length > 0) {
+    where.watchers = { some: { id: { in: filters.watcherId } } };
+  }
+
   if (filters.overdueOnly) {
     where.slaDueAt = { lt: new Date() };
     where.status = { notIn: [...RESOLVED_STATUSES] };
   }
 
-  return prisma.ticket.findMany({
+  // Free text is matched via the search_vector column (title/description/message bodies/OCR'd
+  // attachment text, maintained by Postgres triggers -- see the tickets_search_vector migration)
+  // rather than a Prisma `where` clause, since ts_rank ordering has to win over updatedAt.
+  let rankedIds: string[] | null = null;
+  if (filters.search) {
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "tickets"
+      WHERE "searchVector" @@ websearch_to_tsquery('english', ${filters.search})
+      ORDER BY ts_rank("searchVector", websearch_to_tsquery('english', ${filters.search})) DESC
+    `;
+    rankedIds = rows.map((r) => r.id);
+    if (rankedIds.length === 0) return [];
+    where.id = { in: rankedIds };
+  }
+
+  const tickets = await prisma.ticket.findMany({
     where,
-    orderBy: { updatedAt: 'desc' },
+    orderBy: rankedIds ? undefined : { updatedAt: 'desc' },
     include: { createdBy: true, assignees: true, tags: true, watchers: true },
   });
+
+  if (!rankedIds) return tickets;
+
+  const rank = new Map(rankedIds.map((id, index) => [id, index]));
+  return [...tickets].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+}
+
+/** Resolves a `submitter:`/`cced:` token value (name or email substring) to matching user ids. */
+async function resolveUserIdsBySubstring(query: string): Promise<string[]> {
+  const matches = await prisma.user.findMany({
+    where: {
+      OR: [
+        { name: { contains: query, mode: 'insensitive' } },
+        { email: { contains: query, mode: 'insensitive' } },
+      ],
+    },
+    select: { id: true },
+  });
+  return matches.map((u) => u.id);
+}
+
+/** Resolves an `assigned:` token value to matching admin user ids (assignees are always admins). */
+async function resolveAssigneeIdsBySubstring(query: string): Promise<string[]> {
+  const matches = await prisma.user.findMany({
+    where: { role: 'admin', name: { contains: query, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  return matches.map((u) => u.id);
+}
+
+/** Resolves a `tag:` token value to matching tag ids. */
+async function resolveTagIdsByName(query: string): Promise<string[]> {
+  const matches = await prisma.tag.findMany({
+    where: { name: { contains: query, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  return matches.map((t) => t.id);
+}
+
+/**
+ * Converts parsed `key:value` search tokens (see `parseSearchQuery` in @ticketing/shared) into
+ * `TicketQueueFilters`, resolving name-ish tokens (submitter/cced/assigned/tag) to real ids.
+ * Multiple tokens of the same type accumulate (OR'd via the `some.id.in` clauses above);
+ * `status`/`priority`/`type` tokens must exactly match a known value or are silently ignored.
+ */
+export async function resolveSearchTokensToFilters(
+  tokens: SearchToken[],
+): Promise<Partial<TicketQueueFilters>> {
+  const filters: Partial<TicketQueueFilters> = {};
+
+  for (const token of tokens) {
+    switch (token.type) {
+      case 'submitter': {
+        const ids = await resolveUserIdsBySubstring(token.value);
+        filters.createdById = [...(filters.createdById ?? []), ...ids];
+        break;
+      }
+      case 'cced': {
+        const ids = await resolveUserIdsBySubstring(token.value);
+        filters.watcherId = [...(filters.watcherId ?? []), ...ids];
+        break;
+      }
+      case 'assigned': {
+        const ids = await resolveAssigneeIdsBySubstring(token.value);
+        filters.assigneeId = [...toArray(filters.assigneeId), ...ids];
+        break;
+      }
+      case 'tag': {
+        const ids = await resolveTagIdsByName(token.value);
+        filters.tagId = [...toArray(filters.tagId), ...ids];
+        break;
+      }
+      case 'status':
+        if ((TICKET_STATUSES as readonly string[]).includes(token.value)) {
+          filters.status = token.value as TicketStatus;
+        }
+        break;
+      case 'priority':
+        if ((TICKET_PRIORITIES as readonly string[]).includes(token.value)) {
+          filters.priority = token.value as TicketPriority;
+        }
+        break;
+      case 'type':
+        if ((TICKET_TYPES as readonly string[]).includes(token.value)) {
+          filters.type = token.value as TicketType;
+        }
+        break;
+    }
+  }
+
+  return filters;
 }
 
 export async function getTicketOr404(ticketId: string) {
@@ -135,6 +290,63 @@ export async function verifyTicketToken(ticketId: string, token: string): Promis
   return true;
 }
 
+/** Only the ticket's creator or an admin may mint a share link. */
+export function canShareTicket(
+  ticket: { createdById: string },
+  user: { id: string; role: 'user' | 'admin' },
+): boolean {
+  return user.role === 'admin' || ticket.createdById === user.id;
+}
+
+/** Mints (or re-mints) a reusable "share ticket" invite link. Redeeming it CCs whoever opens
+ * it -- see redeemTicketShareLink -- so it's intentionally not single-use. */
+export async function createTicketShareLink(ticketId: string, createdById: string) {
+  const rawToken = randomBytes(32).toString('hex');
+  await prisma.ticketShareLink.create({
+    data: {
+      ticketId,
+      createdById,
+      tokenHash: hashToken(rawToken),
+      expiresAt: new Date(Date.now() + SHARE_LINK_TTL_MS),
+    },
+  });
+  return { path: `/t/${ticketId}/share?token=${rawToken}` };
+}
+
+/** Read-only lookup for the share-link redemption page. */
+export async function previewTicketShareLink(token: string, ticketId: string) {
+  const link = await prisma.ticketShareLink.findUnique({ where: { tokenHash: hashToken(token) } });
+  if (!link || link.ticketId !== ticketId || link.expiresAt < new Date()) return null;
+  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+  if (!ticket) return null;
+  return { ticketTitle: ticket.title };
+}
+
+/** Adds the signed-in user as a watcher (CC) on the ticket a share link points to. Idempotent --
+ * safe to call repeatedly for the same user (e.g. reopening the link) or for someone who
+ * already has access (owner, assignee, admin), in which case it's a no-op. */
+export async function redeemTicketShareLink(token: string, ticketId: string, userId: string) {
+  const link = await prisma.ticketShareLink.findUnique({ where: { tokenHash: hashToken(token) } });
+  if (!link || link.ticketId !== ticketId || link.expiresAt < new Date()) {
+    throw new AppError('This share link has expired. Ask the ticket owner to share it again.');
+  }
+
+  const ticket = await getTicketOr404(ticketId);
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new NotFoundError('User not found');
+
+  const alreadyHasAccess = canViewTicket(ticket, { id: userId, role: user.role });
+  if (!alreadyHasAccess) {
+    await prisma.ticket.update({
+      where: { id: ticketId },
+      data: { watchers: { connect: { id: userId } } },
+    });
+    await writeAuditLog(userId, 'ticket.share_link_redeem', 'Ticket', ticketId, {});
+  }
+
+  return { ticketId };
+}
+
 export async function createTicket(
   userId: string,
   actorRole: 'user' | 'admin',
@@ -160,52 +372,120 @@ export async function createTicket(
     }
   }
 
-  return prisma.ticket.create({
-    data: {
-      title: input.title,
-      description: input.description,
-      priority: input.priority,
-      type: input.type,
-      createdById: userId,
-      watchers: ccUserIds.length > 0 ? { connect: ccUserIds.map((id) => ({ id })) } : undefined,
-      assignees:
-        assigneeIds.length > 0 ? { connect: assigneeIds.map((id) => ({ id })) } : undefined,
-    },
-    include: { watchers: true, assignees: true },
+  const ticket = await prisma.$transaction(async (tx) => {
+    const incidentNumber = await nextIncidentNumber(tx);
+    return tx.ticket.create({
+      data: {
+        incidentNumber,
+        title: input.title,
+        description: input.description,
+        priority: input.priority,
+        type: input.type,
+        createdById: userId,
+        watchers: ccUserIds.length > 0 ? { connect: ccUserIds.map((id) => ({ id })) } : undefined,
+        assignees:
+          assigneeIds.length > 0 ? { connect: assigneeIds.map((id) => ({ id })) } : undefined,
+        // Ticket.status defaults to 'open', which is in the active-reminder status set --
+        // stamp the clock at creation so the 24h assignee reminder sweep has a start point.
+        activeSince: new Date(),
+      },
+      include: { watchers: true, assignees: true },
+    });
   });
+
+  await writeAuditLog(userId, 'ticket.create', 'Ticket', ticket.id, input as Prisma.InputJsonValue);
+  // Deferred import: keeps env.ts's required-var validation out of the module load path for
+  // pure-function unit tests that never call createTicket.
+  const { env } = await import('@/lib/env');
+  await notifyNewTicketChannel(ticket, env.publicAppUrl);
+
+  return ticket;
 }
 
 /**
- * Creates a ticket from a Discord interaction. Auto-links to an existing user by discordId.
- * Unlinked Discord users get a Discord-only placeholder owner and a claim link that, once they
- * sign in with Authentik, silently attaches their discordId to their real account (see
- * claimDiscordAccount). Already-linked users get a direct token URL -- no login required.
+ * Resolves the ticketing-system owner for an incoming Discord ticket.
+ *
+ * Resolution order:
+ * 1. Local `discordId` match (fast path -- already resolved by a prior call, either through
+ *    this same lookup or the legacy claim flow).
+ * 2. directory-service lookup by Discord username. directory-service is the source of truth
+ *    for org-member Discord linkage (see hourly discordId refresh sweep), so a match here means
+ *    a real org member even if they've never signed in to ticketing via Authentik before --
+ *    upsert a real (non-placeholder) User by email, no claim step needed.
+ * 3. No match anywhere (genuine outsider/guest, not an org member): fall back to the
+ *    Discord-only placeholder + claim-on-first-login flow, unchanged from before.
  */
-export async function createTicketFromDiscord(input: CreateInternalTicketInput, baseUrl: string) {
-  const existingUser = await prisma.user.findUnique({ where: { discordId: input.discordUserId } });
+async function resolveDiscordTicketOwner(
+  discordUserId: string,
+  discordUsername: string,
+): Promise<{ owner: User; isNewUser: boolean }> {
+  const existingByDiscordId = await prisma.user.findUnique({ where: { discordId: discordUserId } });
+  if (existingByDiscordId) return { owner: existingByDiscordId, isNewUser: false };
 
-  const owner =
-    existingUser ??
-    (await prisma.user.create({
-      data: {
-        email: `discord-${input.discordUserId}@placeholder.invalid`,
-        name: input.discordUsername,
-        discordId: input.discordUserId,
-        emailVerified: false,
-        isDiscordPlaceholder: true,
+  const directoryUser = await lookupDirectoryUserByDiscordUsername(discordUsername);
+  if (directoryUser) {
+    const existingByEmail = await prisma.user.findUnique({ where: { email: directoryUser.email } });
+    const owner = await prisma.user.upsert({
+      where: { email: directoryUser.email },
+      create: {
+        email: directoryUser.email,
+        name: directoryUser.name || discordUsername,
+        emailVerified: true,
+        discordId: discordUserId,
+        isDiscordPlaceholder: false,
       },
-    }));
+      update: {
+        discordId: discordUserId,
+        isDiscordPlaceholder: false,
+      },
+    });
+    return { owner, isNewUser: !existingByEmail };
+  }
 
-  const ticket = await prisma.ticket.create({
+  const owner = await prisma.user.create({
     data: {
-      title: input.title,
-      description: input.description,
-      priority: input.priority,
-      type: input.type,
-      createdById: owner.id,
-      discordChannelId: input.discordChannelId,
+      email: `discord-${discordUserId}@placeholder.invalid`,
+      name: discordUsername,
+      discordId: discordUserId,
+      emailVerified: false,
+      isDiscordPlaceholder: true,
     },
   });
+  return { owner, isNewUser: true };
+}
+
+/**
+ * Creates a ticket from a Discord interaction. See resolveDiscordTicketOwner for owner
+ * resolution. A placeholder owner (true outsider, not found anywhere) gets a claim link that,
+ * once they sign in with Authentik, silently attaches their discordId to their real account
+ * (see claimDiscordAccount). Everyone else gets a direct token URL -- no login required.
+ */
+export async function createTicketFromDiscord(input: CreateInternalTicketInput, baseUrl: string) {
+  const { owner, isNewUser } = await resolveDiscordTicketOwner(input.discordUserId, input.discordUsername);
+
+  const ticket = await prisma.$transaction(async (tx) => {
+    const incidentNumber = await nextIncidentNumber(tx);
+    return tx.ticket.create({
+      data: {
+        incidentNumber,
+        title: input.title,
+        description: input.description,
+        priority: input.priority,
+        type: input.type,
+        createdById: owner.id,
+        discordChannelId: input.discordChannelId,
+        // Ticket.status defaults to 'open', which is in the active-reminder status set --
+        // stamp the clock at creation so the 24h assignee reminder sweep has a start point.
+        activeSince: new Date(),
+      },
+    });
+  });
+
+  await writeAuditLog(null, 'ticket.create', 'Ticket', ticket.id, {
+    source: 'discord',
+    discordUserId: input.discordUserId,
+  });
+  await notifyNewTicketChannel(ticket, baseUrl);
 
   if (owner.isDiscordPlaceholder) {
     const rawClaimToken = randomBytes(32).toString('hex');
@@ -225,12 +505,15 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
     });
 
     const claimPath = `/link-discord/claim?token=${rawClaimToken}`;
-    await notifyTicketCreated({ id: ticket.id, createdBy: owner }, `${baseUrl}${claimPath}`);
+    await notifyTicketCreated(
+      { id: ticket.id, incidentNumber: ticket.incidentNumber, title: ticket.title, createdBy: owner },
+      `${baseUrl}${claimPath}`,
+    );
 
     return {
       ticket,
       path: claimPath,
-      isNewUser: !existingUser,
+      isNewUser,
     };
   }
 
@@ -244,12 +527,15 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
   });
 
   const tokenPath = `/t/${ticket.id}?token=${rawToken}`;
-  await notifyTicketCreated({ id: ticket.id, createdBy: owner }, `${baseUrl}${tokenPath}`);
+  await notifyTicketCreated(
+    { id: ticket.id, incidentNumber: ticket.incidentNumber, title: ticket.title, createdBy: owner },
+    `${baseUrl}${tokenPath}`,
+  );
 
   return {
     ticket,
     path: tokenPath,
-    isNewUser: !existingUser,
+    isNewUser,
   };
 }
 
@@ -328,6 +614,11 @@ export async function claimDiscordAccount(token: string, realUserId: string) {
     }),
   ]);
 
+  await writeAuditLog(realUserId, 'discord.claim', 'User', realUserId, {
+    placeholderUserId: placeholder.id,
+    discordId: placeholder.discordId,
+  });
+
   return { ticketId: claim.ticketId };
 }
 
@@ -403,6 +694,8 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
 
   if (input.slaDueAt !== undefined) {
     data.slaDueAt = input.slaDueAt ? new Date(input.slaDueAt) : null;
+    // A new/pushed-out deadline invalidates any prior breach alert dedupe stamp.
+    data.slaBreachNotifiedAt = null;
   }
 
   if (input.tagIds !== undefined) {
@@ -419,15 +712,7 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
     include: { tags: true, assignees: true, createdBy: true, watchers: true },
   });
 
-  await prisma.auditLog.create({
-    data: {
-      actorId,
-      action: 'ticket.update',
-      targetType: 'Ticket',
-      targetId: ticketId,
-      meta: input as Prisma.InputJsonValue,
-    },
-  });
+  await writeAuditLog(actorId, 'ticket.update', 'Ticket', ticketId, input as Prisma.InputJsonValue);
 
   if (input.status && input.status !== previous.status) {
     if (RESOLVED_STATUSES.includes(input.status)) {
@@ -456,6 +741,7 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
     const { env } = await import('@/lib/env');
     await notifyStatusChanged(ticket, input.status, actorId, env.publicAppUrl);
     await handlePendingTransition(ticket, previous.status, env.publicAppUrl);
+    await handleActiveStatusTransition(ticketId, input.status);
   }
 
   return ticket;

@@ -2,6 +2,8 @@ import { prisma } from '@ticketing/db';
 import type { RequestUploadInput } from '@ticketing/shared';
 import { ForbiddenError, NotFoundError } from '@/lib/errors';
 import { buildAttachmentKey, deleteObject, getDownloadUrl, getUploadUrl } from '@/lib/storage';
+import { writeAuditLog } from '@/server/audit';
+import { notifyAttachmentAdded } from '@/server/notifications';
 
 const ATTACHMENT_RETENTION_MS = 1000 * 60 * 60 * 24 * 30;
 
@@ -24,6 +26,17 @@ export async function requestAttachmentUpload(
     },
   });
 
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    include: { watchers: true, assignees: true, createdBy: true },
+  });
+  if (ticket) {
+    // Deferred import: keeps env.ts's required-var validation out of the module load path for
+    // tests that never call requestAttachmentUpload (same tradeoff as tickets.ts's addMessage).
+    const { env } = await import('@/lib/env');
+    await notifyAttachmentAdded(ticket, uploadedById, env.publicAppUrl);
+  }
+
   return { attachment, uploadUrl };
 }
 
@@ -45,6 +58,11 @@ export async function deleteAttachment(
   }
   await deleteObject(attachment.storageKey);
   await prisma.ticketAttachment.delete({ where: { id: attachmentId } });
+
+  await writeAuditLog(actor.id, 'attachment.delete', 'TicketAttachment', attachmentId, {
+    ticketId: attachment.ticketId,
+    fileName: attachment.fileName,
+  });
 }
 
 /** Deletes attachments on tickets that have been resolved/closed for 30+ days. */

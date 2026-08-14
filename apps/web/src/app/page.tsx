@@ -1,26 +1,75 @@
+import Image from "next/image";
 import Link from "next/link";
-import { ChevronRight, Inbox } from "lucide-react";
+import { ChevronRight, Inbox, ShieldCheck } from "lucide-react";
 import { getCurrentSession } from "@/lib/session";
 import { groupTicketsByStatus, listTicketsForUser } from "@/server/tickets";
 import { AppHeader } from "@/components/AppHeader";
 import { NewTicketForm } from "@/components/NewTicketForm";
-import { mutedText, page, pageHeader, pageNarrow, pageTitle } from "@/lib/styles";
+import { SignInButton } from "@/components/SignInButton";
+import { sanitizeCallbackUrl } from "@/lib/callbackUrl";
+import {
+    mutedText,
+    page,
+    pageHeader,
+    pageTitle,
+    signInBrand,
+    signInCard,
+    signInEyebrow,
+    signInFootnote,
+    signInGlow,
+    signInGrid,
+    signInPage,
+    signInSubtitle,
+    signInTitle,
+} from "@/lib/styles";
 import { StatusPill } from "@/lib/ticketStatus";
 
-export default async function DashboardPage() {
+interface PageProps {
+    searchParams: Promise<{ callbackUrl?: string }>;
+}
+
+export default async function DashboardPage({ searchParams }: PageProps) {
     const session = await getCurrentSession();
 
     if (!session) {
+        const { callbackUrl } = await searchParams;
+        const safeCallbackUrl = sanitizeCallbackUrl(callbackUrl);
+
         return (
-            <>
-                <AppHeader />
-                <main className={`${pageNarrow} flex flex-col items-center gap-4 text-center`}>
-                    <h1 className="text-2xl font-semibold tracking-tight text-text">
-                        Support Tickets
-                    </h1>
-                    <p className={mutedText}>Sign in to view or open a ticket.</p>
-                </main>
-            </>
+            <main className={signInPage}>
+                <div className={signInGlow} aria-hidden="true" />
+                <div className={signInGrid} aria-hidden="true" />
+
+                <div className="w-full max-w-sm animate-fade-in-up">
+                    <div className={signInBrand}>
+                        <Image
+                            src="/branding/logo-horizontal.png"
+                            alt="Monash Automation"
+                            width={220}
+                            height={47}
+                            priority
+                            className="h-9 w-auto"
+                        />
+                        <p className={signInEyebrow}>Ticketing System</p>
+                    </div>
+
+                    <div className={signInCard}>
+                        <h1 className={signInTitle}>Welcome back</h1>
+                        <p className={signInSubtitle}>
+                            Sign in with your Monash Automation account to submit and track support tickets.
+                        </p>
+
+                        <div className="mt-6">
+                            <SignInButton size="lg" callbackUrl={safeCallbackUrl} />
+                        </div>
+
+                        <p className={signInFootnote}>
+                            <ShieldCheck className="h-3.5 w-3.5" />
+                            Secured by Authentik single sign-on
+                        </p>
+                    </div>
+                </div>
+            </main>
         );
     }
 
@@ -87,6 +136,8 @@ function TicketRow({
                 <div>
                     <p className="font-medium text-text">{ticket.title}</p>
                     <p className={mutedText}>
+                        <span className="font-mono">{ticket.incidentNumber}</span>
+                        {" · "}
                         {ticket.createdBy.name}
                         {ticket.assignees.length > 0
                             ? ` · assigned to ${ticket.assignees.map((a) => a.name).join(", ")}`

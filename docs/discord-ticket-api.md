@@ -44,6 +44,7 @@ Validated via `createInternalTicketSchema` (Zod). Invalid body → `400` with `d
   "success": true,
   "data": {
     "ticketId": "clx...",
+    "incidentNumber": "INC-2026-000123",
     "isNewUser": true,
     "url": "https://tickets.example.com/link-discord/claim?token=<claimToken>"
   }
@@ -64,7 +65,7 @@ Backend looks up `User` by `discordId`:
 - **Unknown user**: creates a placeholder `User` (`isDiscordPlaceholder: true`, `discordId` stored, `name` = `discordUsername`), a `DiscordClaim` (30-min TTL) tied to that placeholder and the new ticket, and returns
   `url = ${PUBLIC_APP_URL}/link-discord/claim?token={claimToken}` — silent identifier link. When the user later signs in via Authentik and opens that link, the app links their real account to the placeholder (merging `discordId`/`discordUsername`), and they land on the ticket.
 
-This app queues its own "your ticket has been created" DM to `discordUserId` with the returned `url` — the caller does not need to send anything itself. `isNewUser` is returned in case it's useful for other messaging ("welcome, first time you've opened a ticket" etc), but is not required.
+This app queues its own "your ticket has been created" DM to `discordUserId` with the returned `url` (message includes `incidentNumber`) — the caller does not need to send anything itself. `isNewUser` is returned in case it's useful for other messaging ("welcome, first time you've opened a ticket" etc), but is not required. `incidentNumber` (e.g. `INC-2026-000123`) is a human-readable ref, separate from `ticketId`, useful for bot-side embed titles/channel names.
 
 `discordUserId` is persisted on `User.discordId` and used for all future DMs on this ticket (replies, status changes, etc).
 

@@ -52,6 +52,7 @@ enum MaintenanceSource {
 enum NotificationType {
   reply
   status_changed
+  sla_breach
 }
 
 enum DiscordDmKind {
@@ -63,6 +64,14 @@ enum DiscordDmKind {
   status_updated
   closed
   resolved
+  sla_breach
+  assignee_updated
+  assignee_idle_reminder
+}
+
+enum DiscordChannelMessageKind {
+  ticket_created
+  unassigned_backlog
 }
 
 /// BetterAuth-managed user table. id/email/emailVerified/name/image/createdAt/updatedAt
@@ -93,6 +102,7 @@ model User {
   auditLogs       AuditLog[]
   uploadedAttachments TicketAttachment[]
   notifications   Notification[]
+  ticketShareLinksCreated TicketShareLink[]
 
   @@map("users")
 }
@@ -149,6 +159,10 @@ model Verification {
 
 model Ticket {
   id                String       @id @default(cuid())
+  /// Human-readable ref shown to users/admins/Discord, e.g. "INC-2026-000123".
+  /// Distinct from `id` (internal cuid PK). Generated from TicketIncidentCounter,
+  /// see nextIncidentNumber() in server/tickets.ts.
+  incidentNumber    String       @unique
   title             String
   description       String
   status            TicketStatus @default(open)
@@ -163,11 +177,25 @@ model Ticket {
   /// 24-hour escalation reminder DM and dedupes the initial "awaiting your response" DM.
   pendingSince           DateTime?
   pendingEscalationSentAt DateTime?
+  /// Set once the SLA-breach alert DM/notification has been sent, so the hourly sweep
+  /// doesn't re-notify every run. Cleared whenever slaDueAt is pushed out or the ticket resolves.
+  slaBreachNotifiedAt DateTime?
+  /// Set whenever status transitions into (or between) open/in_progress/escalated; cleared
+  /// on leaving that set. Drives the 24h "still sitting" reminder DM to assignees -- distinct
+  /// from pendingSince, which is pending-only and targets the creator, not assignees.
+  activeSince           DateTime?
+  activeReminderSentAt  DateTime?
+  /// Aggregates title/description + ticket_messages.body + ticket_attachments.ocrText,
+  /// maintained by Postgres triggers (see migration) -- not written from application code.
+  /// Prisma can't model tsvector directly, so this field is unreadable/unwritable via the
+  /// client; all access to it goes through prisma.$queryRaw in listTicketsForAdminQueue.
+  searchVector      Unsupported("tsvector")?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
   messages      TicketMessage[]
   accessTokens  TicketAccessToken[]
+  shareLinks    TicketShareLink[]
   attachments   TicketAttachment[]
   tags          Tag[]               @relation("TicketTags")
   watchers      User[]              @relation("TicketWatchers")
@@ -179,6 +207,16 @@ model Ticket {
   @@index([createdById])
   @@index([slaDueAt])
   @@map("tickets")
+}
+
+/// Backs Ticket.incidentNumber generation: one row per calendar year, incremented
+/// atomically (INSERT ... ON CONFLICT DO UPDATE) inside the same transaction as the
+/// ticket create, so numbers are gapless-per-year and collision-free under concurrency.
+model TicketIncidentCounter {
+  year      Int @id
+  lastValue Int @default(0)
+
+  @@map("ticket_incident_counters")
 }
 
 /// In-app notification tray entry. One row per (user, event) -- e.g. every watcher on a
@@ -216,6 +254,35 @@ model DiscordDm {
   @@map("discord_dms")
 }
 
+/// Outbound Discord channel-message queue, mirrors DiscordDm. apps/bot polls this
+/// alongside the DM queue and posts via discordbot's POST /api/v1/messages/.
+model DiscordChannelMessage {
+  id        String                     @id @default(cuid())
+  channelId String
+  kind      DiscordChannelMessageKind
+  message   String
+  sentAt    DateTime?
+  createdAt DateTime                   @default(now())
+
+  @@index([sentAt])
+  @@index([kind, createdAt])
+  @@map("discord_channel_messages")
+}
+
+/// Singleton admin-configurable Discord settings row (id is always "singleton").
+/// Edited via /admin/settings, gated the same as the rest of /admin (role === 'admin').
+model DiscordSettings {
+  id                        String   @id @default("singleton")
+  /// Channel a "new ticket created" message is posted to. Null = feature off.
+  newTicketChannelId        String?
+  /// Channel the daily unassigned-ticket-backlog alert is posted to. Null = feature off.
+  unassignedAlertChannelId  String?
+  updatedById               String?
+  updatedAt                 DateTime @updatedAt
+
+  @@map("discord_settings")
+}
+
 model Tag {
   id        String   @id @default(cuid())
   name      String   @unique
@@ -237,9 +304,16 @@ model TicketAttachment {
   mimeType     String
   sizeBytes    Int
   storageKey   String   @unique
+  /// OCR-extracted text (image attachments only). Null = not yet attempted or not
+  /// an OCR-eligible mime type; see ocrProcessedAt to distinguish the two.
+  ocrText       String?
+  /// Stamped after one OCR attempt, success or failure, so the sweep never retries
+  /// forever. Non-null with ocrText null means OCR ran and found/extracted nothing.
+  ocrProcessedAt DateTime?
   createdAt    DateTime @default(now())
 
   @@index([ticketId])
+  @@index([ocrProcessedAt])
   @@map("ticket_attachments")
 }
 
@@ -268,6 +342,24 @@ model TicketAccessToken {
 
   @@index([ticketId])
   @@map("ticket_access_tokens")
+}
+
+/// A "Share ticket" invite link. Unlike TicketAccessToken (unauthenticated view-only, minted
+/// for pre-link Discord users), redeeming this always requires signing in, and doing so adds
+/// the signed-in user as a ticket watcher (CC). Not single-use -- anyone holding the link can
+/// redeem it until it expires, so multiple people can be CC'd from the same link.
+model TicketShareLink {
+  id          String   @id @default(cuid())
+  ticketId    String
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tokenHash   String   @unique
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([ticketId])
+  @@map("ticket_share_links")
 }
 
 /// Tracks a pending Discord-to-Authentik claim for a placeholder user created
