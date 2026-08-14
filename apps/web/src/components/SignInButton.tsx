@@ -4,11 +4,17 @@ import { LogIn } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { buttonPrimary, buttonPrimaryLg } from '@/lib/styles';
 
-export function SignInButton({ size = 'sm' }: { size?: 'sm' | 'lg' }) {
+export function SignInButton({
+  size = 'sm',
+  callbackUrl = '/',
+}: {
+  size?: 'sm' | 'lg';
+  callbackUrl?: string;
+}) {
   const onClick = () =>
     authClient.signIn.oauth2({
       providerId: 'authentik',
-      callbackURL: '/',
+      callbackURL: callbackUrl,
     });
 
   if (size === 'lg') {

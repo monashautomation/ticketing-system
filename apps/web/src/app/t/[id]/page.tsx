@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { getCurrentSession } from '@/lib/session';
 import { canViewTicket, getTicketOr404, isOverdue, verifyTicketToken } from '@/server/tickets';
 import { markTicketNotificationsRead } from '@/server/notifications';
@@ -24,15 +24,21 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
   const { id } = await params;
   const { token } = await searchParams;
 
-  const ticket = await getTicketOr404(id).catch(() => null);
-  if (!ticket) notFound();
-
   const session = await getCurrentSession();
   const user = session
     ? { id: session.user.id, role: session.user.role as 'user' | 'admin' }
     : null;
 
   const hasTokenAccess = token ? await verifyTicketToken(id, token) : false;
+
+  if (!user && !hasTokenAccess) {
+    const originalPath = `/t/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    redirect(`/?callbackUrl=${encodeURIComponent(originalPath)}`);
+  }
+
+  const ticket = await getTicketOr404(id).catch(() => null);
+  if (!ticket) notFound();
+
   if (!hasTokenAccess && !canViewTicket(ticket, user)) notFound();
 
   if (user) await markTicketNotificationsRead(id, user.id);

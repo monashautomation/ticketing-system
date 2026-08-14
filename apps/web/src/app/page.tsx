@@ -6,6 +6,7 @@ import { groupTicketsByStatus, listTicketsForUser } from "@/server/tickets";
 import { AppHeader } from "@/components/AppHeader";
 import { NewTicketForm } from "@/components/NewTicketForm";
 import { SignInButton } from "@/components/SignInButton";
+import { sanitizeCallbackUrl } from "@/lib/callbackUrl";
 import {
     mutedText,
     page,
@@ -23,10 +24,17 @@ import {
 } from "@/lib/styles";
 import { StatusPill } from "@/lib/ticketStatus";
 
-export default async function DashboardPage() {
+interface PageProps {
+    searchParams: Promise<{ callbackUrl?: string }>;
+}
+
+export default async function DashboardPage({ searchParams }: PageProps) {
     const session = await getCurrentSession();
 
     if (!session) {
+        const { callbackUrl } = await searchParams;
+        const safeCallbackUrl = sanitizeCallbackUrl(callbackUrl);
+
         return (
             <main className={signInPage}>
                 <div className={signInGlow} aria-hidden="true" />
@@ -52,7 +60,7 @@ export default async function DashboardPage() {
                         </p>
 
                         <div className="mt-6">
-                            <SignInButton size="lg" />
+                            <SignInButton size="lg" callbackUrl={safeCallbackUrl} />
                         </div>
 
                         <p className={signInFootnote}>
