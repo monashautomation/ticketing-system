@@ -8,6 +8,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { TicketThread } from '@/components/TicketThread';
 import { AdminTicketControls } from '@/components/AdminTicketControls';
 import { TicketAttachments } from '@/components/TicketAttachments';
+import { TicketHistoryTimeline } from '@/components/TicketHistoryTimeline';
 import { TicketTitleEditor } from '@/components/TicketTitleEditor';
 import { CcEditor } from '@/components/CcEditor';
 import { ShareTicketButton } from '@/components/ShareTicketButton';
@@ -146,6 +147,8 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
           isAdmin={isAdmin}
         />
       )}
+
+      {user && <TicketHistoryTimeline entries={ticket.history} />}
 
       <TicketThread
         ticketId={ticket.id}
