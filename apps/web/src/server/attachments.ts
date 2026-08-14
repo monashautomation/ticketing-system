@@ -4,6 +4,7 @@ import { ForbiddenError, NotFoundError } from '@/lib/errors';
 import { buildAttachmentKey, deleteObject, getDownloadUrl, getUploadUrl } from '@/lib/storage';
 import { writeAuditLog } from '@/server/audit';
 import { notifyAttachmentAdded } from '@/server/notifications';
+import { recordTicketHistory } from '@/server/ticketHistory';
 
 const ATTACHMENT_RETENTION_MS = 1000 * 60 * 60 * 24 * 30;
 
@@ -25,6 +26,10 @@ export async function requestAttachmentUpload(
       storageKey,
     },
   });
+
+  await recordTicketHistory(ticketId, uploadedById, [
+    { field: 'attachment', action: 'added', toValue: input.fileName },
+  ]);
 
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
@@ -63,6 +68,9 @@ export async function deleteAttachment(
     ticketId: attachment.ticketId,
     fileName: attachment.fileName,
   });
+  await recordTicketHistory(attachment.ticketId, actor.id, [
+    { field: 'attachment', action: 'removed', fromValue: attachment.fileName },
+  ]);
 }
 
 /** Deletes attachments on tickets that have been resolved/closed for 30+ days. */
