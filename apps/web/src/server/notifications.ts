@@ -387,16 +387,19 @@ export async function queueActiveStatusReminders(baseUrl: string): Promise<numbe
 }
 
 /**
- * Posts a new-ticket message to the admin-configured channel, if one is set. Incident number +
- * title + link to the specific ticket -- no description/priority/reporter, per the
+ * Posts a new-ticket message to the routing channel. A grouped ticket (groupId set) posts to
+ * that TicketGroup's announcementChannelId; an "unsure" ticket (groupId null) falls back to the
+ * admin-configured DiscordSettings.newTicketChannelId, same as before groups existed. Incident
+ * number + title + link to the specific ticket -- no description/priority/reporter, per the
  * no-ticket-details-outside-app rule.
  */
 export async function notifyNewTicketChannel(
-  ticket: { id: string; incidentNumber: string; title: string },
+  ticket: { id: string; incidentNumber: string; title: string; groupId?: string | null },
   baseUrl: string,
 ): Promise<void> {
-  const settings = await prisma.discordSettings.findUnique({ where: { id: 'singleton' } });
-  const channelId = settings?.newTicketChannelId;
+  const channelId = ticket.groupId
+    ? (await prisma.ticketGroup.findUnique({ where: { id: ticket.groupId } }))?.announcementChannelId
+    : (await prisma.discordSettings.findUnique({ where: { id: 'singleton' } }))?.newTicketChannelId;
   if (!channelId) return;
 
   await prisma.discordChannelMessage.create({
@@ -409,38 +412,66 @@ export async function notifyNewTicketChannel(
 }
 
 /**
- * Daily (9am server time) sweep: if there's an admin-configured channel and at least one
- * unassigned open/pending/escalated/in_progress ticket, posts a count + link to /admin (not to
- * any specific ticket). Deduped to once per calendar day via the most recent
- * `unassigned_backlog` DiscordChannelMessage row.
+ * Daily (9am server time) sweep, posting one "N unassigned tickets" message per unique
+ * backlog channel:
+ *  - The admin channel (DiscordSettings.unassignedAlertChannelId) counts only "unsure"
+ *    (groupId null) unassigned tickets -- group-routed tickets are never double-counted here.
+ *  - Each TicketGroup.unassignedBacklogChannelId counts that group's unassigned tickets. Groups
+ *    sharing the same channel id are combined into a single message with the summed count
+ *    (per product decision: group A + group B on the same channel => one message, not two).
+ * Deduped to once per calendar day per channel id via the most recent `unassigned_backlog`
+ * DiscordChannelMessage row on that channel.
  */
 export async function queueUnassignedBacklogAlert(baseUrl: string): Promise<void> {
   const now = new Date();
   if (now.getHours() !== UNASSIGNED_ALERT_HOUR) return;
 
-  const settings = await prisma.discordSettings.findUnique({ where: { id: 'singleton' } });
-  const channelId = settings?.unassignedAlertChannelId;
-  if (!channelId) return;
-
   const startOfDay = new Date(now);
   startOfDay.setHours(0, 0, 0, 0);
-  const alreadySentToday = await prisma.discordChannelMessage.findFirst({
-    where: { kind: 'unassigned_backlog', createdAt: { gte: startOfDay } },
-  });
-  if (alreadySentToday) return;
 
-  const count = await prisma.ticket.count({
-    where: { status: { in: [...UNASSIGNED_BACKLOG_STATUSES] }, assignees: { none: {} } },
-  });
-  if (count === 0) return;
+  async function alreadySentToday(channelId: string): Promise<boolean> {
+    const sent = await prisma.discordChannelMessage.findFirst({
+      where: { channelId, kind: 'unassigned_backlog', createdAt: { gte: startOfDay } },
+    });
+    return sent !== null;
+  }
 
-  await prisma.discordChannelMessage.create({
-    data: {
-      channelId,
-      kind: 'unassigned_backlog',
-      message: `${count} open ticket${count === 1 ? '' : 's'} have no assignee. View the ticketing system: ${baseUrl}/admin`,
-    },
+  async function postCount(channelId: string, count: number, link: string): Promise<void> {
+    if (count === 0) return;
+    if (await alreadySentToday(channelId)) return;
+    await prisma.discordChannelMessage.create({
+      data: {
+        channelId,
+        kind: 'unassigned_backlog',
+        message: `${count} open ticket${count === 1 ? '' : 's'} have no assignee. View the ticketing system: ${link}`,
+      },
+    });
+  }
+
+  const settings = await prisma.discordSettings.findUnique({ where: { id: 'singleton' } });
+  if (settings?.unassignedAlertChannelId) {
+    const count = await prisma.ticket.count({
+      where: { status: { in: [...UNASSIGNED_BACKLOG_STATUSES] }, assignees: { none: {} }, groupId: null },
+    });
+    await postCount(settings.unassignedAlertChannelId, count, `${baseUrl}/admin`);
+  }
+
+  const groups = await prisma.ticketGroup.findMany({
+    where: { unassignedBacklogChannelId: { not: null } },
+    select: { id: true, unassignedBacklogChannelId: true },
   });
+  const groupIdsByChannel = new Map<string, string[]>();
+  for (const group of groups) {
+    const channelId = group.unassignedBacklogChannelId as string;
+    groupIdsByChannel.set(channelId, [...(groupIdsByChannel.get(channelId) ?? []), group.id]);
+  }
+
+  for (const [channelId, groupIds] of groupIdsByChannel) {
+    const count = await prisma.ticket.count({
+      where: { status: { in: [...UNASSIGNED_BACKLOG_STATUSES] }, assignees: { none: {} }, groupId: { in: groupIds } },
+    });
+    await postCount(channelId, count, `${baseUrl}/incoming`);
+  }
 }
 
 /** Background sweep: tickets stuck in `pending` for 24+ hours get a single follow-up DM. */
