@@ -68,16 +68,73 @@ export async function syncAuthentikUsers(): Promise<{ upserted: number }> {
         name: authentikUser.name || authentikUser.email,
         emailVerified: true,
         role,
+        authentikGroups: groupNames,
       },
       update: {
         name: authentikUser.name || authentikUser.email,
         role,
+        authentikGroups: groupNames,
       },
     });
     upserted += 1;
   }
 
+  await syncTicketGroupMembership();
+
   return { upserted };
+}
+
+/**
+ * Recomputes every TicketGroup's `members` from the freshly-synced User.authentikGroups --
+ * a user belongs to a TicketGroup iff at least one of their Authentik groups is in that
+ * TicketGroup's linked list. Runs after every syncAuthentikUsers pass so membership never
+ * drifts more than one sync cycle behind Authentik. `set` (not `connect`) so removals apply.
+ */
+async function syncTicketGroupMembership(): Promise<void> {
+  const [groups, users] = await Promise.all([
+    prisma.ticketGroup.findMany({ select: { id: true, authentikGroupNames: true } }),
+    prisma.user.findMany({ where: { isDiscordPlaceholder: false }, select: { id: true, authentikGroups: true } }),
+  ]);
+  if (groups.length === 0) return;
+
+  for (const group of groups) {
+    const linked = new Set(group.authentikGroupNames);
+    const memberIds = users
+      .filter((u) => u.authentikGroups.some((g) => linked.has(g)))
+      .map((u) => ({ id: u.id }));
+
+    await prisma.ticketGroup.update({
+      where: { id: group.id },
+      data: { members: { set: memberIds } },
+    });
+  }
+}
+
+interface AuthentikGroupListResponse {
+  pagination: { next: number };
+  results: { name: string }[];
+}
+
+/** Full list of Authentik group names, for the TicketGroup settings picker. */
+export async function fetchAuthentikGroupNames(): Promise<string[]> {
+  const names: string[] = [];
+  let page = 1;
+  for (;;) {
+    const url = new URL('core/groups/', apiRoot());
+    url.searchParams.set('page', String(page));
+    url.searchParams.set('page_size', '200');
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${env.authentikApiToken}` },
+    });
+    if (!res.ok) {
+      throw new Error(`Authentik group list request failed: ${res.status} ${res.statusText}`);
+    }
+    const body = (await res.json()) as AuthentikGroupListResponse;
+    names.push(...body.results.map((g) => g.name));
+    if (!body.pagination.next || body.pagination.next === page) break;
+    page = body.pagination.next;
+  }
+  return names;
 }
 
 /**
