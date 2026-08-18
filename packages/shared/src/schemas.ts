@@ -8,6 +8,8 @@ export const createTicketSchema = z.object({
   type: z.enum(TICKET_TYPES).default('other'),
   ccUserIds: z.array(z.string().min(1)).optional(),
   assigneeIds: z.array(z.string().min(1)).optional(),
+  /** Null/omitted = "unsure" -- routed to admins only, same as pre-groups behavior. */
+  groupId: z.string().min(1).nullable().optional(),
 });
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
 
@@ -36,6 +38,7 @@ export const updateTicketSchema = z.object({
   watcherIds: z.array(z.string()).optional(),
   resolutionMessage: z.string().min(1).max(2000).optional(),
   closeReason: z.enum(CLOSE_REASONS).optional(),
+  groupId: z.string().min(1).nullable().optional(),
 });
 
 /** Ticket creators (non-admin) may only edit the CC list on their own ticket. */
@@ -59,6 +62,14 @@ export const updateDiscordSettingsSchema = z.object({
   unassignedAlertChannelId: optionalChannelId,
 });
 export type UpdateDiscordSettingsInput = z.infer<typeof updateDiscordSettingsSchema>;
+
+export const ticketGroupSchema = z.object({
+  name: z.string().min(1).max(80),
+  authentikGroupNames: z.array(z.string().min(1)).min(1, 'Link at least one Authentik group'),
+  announcementChannelId: optionalChannelId,
+  unassignedBacklogChannelId: optionalChannelId,
+});
+export type TicketGroupInput = z.infer<typeof ticketGroupSchema>;
 
 export const createTagSchema = z.object({
   name: z.string().min(1).max(40),
