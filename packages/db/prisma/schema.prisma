@@ -85,6 +85,9 @@ model User {
   image         String?
   role          UserRole  @default(user)
   discordId     String?   @unique
+  /// Raw Authentik group names from the last sync (see syncAuthentikUsers). Used to
+  /// (re)compute TicketGroup membership -- not itself used for authorization directly.
+  authentikGroups String[] @default([])
   /// True for a Discord-only placeholder account created before the user has
   /// signed in via Authentik. Cleared (and the row deleted) once claimed --
   /// see DiscordClaim.
@@ -104,6 +107,7 @@ model User {
   notifications   Notification[]
   ticketShareLinksCreated TicketShareLink[]
   ticketHistoryEntries    TicketHistory[]
+  ticketGroups            TicketGroup[]   @relation("TicketGroupMembers")
 
   @@map("users")
 }
@@ -171,6 +175,10 @@ model Ticket {
   type              TicketType   @default(other)
   createdById       String
   createdBy         User         @relation("TicketCreatedBy", fields: [createdById], references: [id])
+  /// Which TicketGroup this ticket was sent to. Null = "unsure" -- admin-only, same as
+  /// the pre-groups behavior. Set at creation, reassignable by admins afterward.
+  groupId           String?
+  group             TicketGroup? @relation(fields: [groupId], references: [id])
   discordChannelId  String?
   slaDueAt          DateTime?
   resolvedAt        DateTime?
@@ -208,7 +216,30 @@ model Ticket {
   @@index([status])
   @@index([createdById])
   @@index([slaDueAt])
+  @@index([groupId])
   @@map("tickets")
+}
+
+/// Admin-defined routing group (e.g. "Networking", "Facilities"). Linked to one or more
+/// Authentik groups via the settings picker -- membership is recomputed from
+/// User.authentikGroups on every syncAuthentikUsers run, not stored as a static list.
+model TicketGroup {
+  id                          String   @id @default(cuid())
+  name                        String   @unique
+  /// Authentik group names whose members belong to this TicketGroup. Requires >= 1.
+  authentikGroupNames         String[] @default([])
+  /// Posted to when a ticket is routed to this group. Null = feature off for this group.
+  announcementChannelId       String?
+  /// Daily unassigned-backlog count for this group. Multiple groups may share the same
+  /// channel id -- see queueUnassignedBacklogAlert, which aggregates by channel, not group.
+  unassignedBacklogChannelId  String?
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  members User[]   @relation("TicketGroupMembers")
+  tickets Ticket[]
+
+  @@map("ticket_groups")
 }
 
 /// Backs Ticket.incidentNumber generation: one row per calendar year, incremented
@@ -403,6 +434,7 @@ enum TicketHistoryField {
   tag
   watcher
   attachment
+  group
 }
 
 enum TicketHistoryAction {
