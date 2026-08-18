@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getCurrentSession } from '@/lib/session';
-import { canViewTicket, getTicketOr404, isOverdue, verifyTicketToken } from '@/server/tickets';
+import { canManageTicket, canViewTicket, getTicketOr404, isOverdue, verifyTicketToken } from '@/server/tickets';
 import { markTicketNotificationsRead } from '@/server/notifications';
 import { listTags } from '@/server/tags';
 import { AppHeader } from '@/components/AppHeader';
@@ -47,6 +47,7 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
 
   const isAdmin = user?.role === 'admin';
   const isOwner = user?.id === ticket.createdById;
+  const canManage = user ? canManageTicket(ticket, user) : false;
   const visibleMessages = isAdmin ? ticket.messages : ticket.messages.filter((m) => !m.isInternalNote);
   const overdue = isOverdue(ticket);
   const isClosed = ticket.status === 'closed';
@@ -62,7 +63,7 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
       <p className={`mb-1 font-mono text-xs ${mutedText}`}>{ticket.incidentNumber}</p>
 
       <div className={`mb-6 flex items-start justify-between gap-4 ${isClosed ? 'opacity-60' : ''}`}>
-        {isAdmin ? (
+        {canManage ? (
           <TicketTitleEditor
             ticketId={ticket.id}
             initialTitle={ticket.title}
@@ -101,7 +102,7 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
         ))}
       </div>
 
-      {!isAdmin && isOwner && (
+      {!canManage && isOwner && (
         <div className="mb-3">
           <CcEditor
             ticketId={ticket.id}
@@ -109,7 +110,7 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
           />
         </div>
       )}
-      {!isAdmin && !isOwner && ticket.watchers.length > 0 && (
+      {!canManage && !isOwner && ticket.watchers.length > 0 && (
         <p className={`mb-3 ${mutedText}`}>CC: {ticket.watchers.map((w) => w.name).join(', ')}</p>
       )}
 
@@ -125,9 +126,10 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
         </p>
       )}
 
-      {isAdmin && (
+      {canManage && (
         <AdminTicketControls
           ticketId={ticket.id}
+          groupId={ticket.groupId}
           currentStatus={ticket.status}
           currentPriority={ticket.priority}
           currentType={ticket.type}
@@ -144,7 +146,7 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
           ticketId={ticket.id}
           attachments={ticket.attachments}
           currentUserId={user.id}
-          isAdmin={isAdmin}
+          isAdmin={canManage}
         />
       )}
 

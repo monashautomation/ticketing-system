@@ -2,6 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { BarChart3, Inbox, Settings, Tag as TagIcon, Ticket } from 'lucide-react';
 import { getCurrentSession } from '@/lib/session';
+import { listTicketGroupsForUser } from '@/server/ticketGroups';
 import { SignInButton } from '@/components/SignInButton';
 import { LogoutButton } from '@/components/LogoutButton';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -26,6 +27,7 @@ function initials(name: string): string {
 export async function AppHeader() {
   const session = await getCurrentSession();
   const role = session?.user.role as 'user' | 'admin' | undefined;
+  const myGroups = session ? await listTicketGroupsForUser(session.user.id) : [];
 
   return (
     <header className={headerBar}>
@@ -47,6 +49,12 @@ export async function AppHeader() {
               <Ticket className="h-4 w-4" />
               My Tickets
             </Link>
+            {myGroups.length > 0 && (
+              <Link href="/incoming" className={`${navLink} inline-flex items-center gap-1.5`}>
+                <Inbox className="h-4 w-4" />
+                Incoming
+              </Link>
+            )}
             {role === 'admin' && (
               <>
                 <Link href="/admin" className={`${navLink} inline-flex items-center gap-1.5`}>

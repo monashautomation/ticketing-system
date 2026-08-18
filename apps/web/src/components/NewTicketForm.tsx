@@ -5,13 +5,18 @@ import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { TICKET_PRIORITIES, TICKET_TYPES } from '@ticketing/shared';
 import type { TicketPriority, TicketType } from '@ticketing/shared';
-import { buttonGhost, buttonPrimary, card, errorText, input, label, mutedText } from '@/lib/styles';
+import { buttonGhost, buttonPrimary, card, errorText, input, label, mutedText, select as selectStyle } from '@/lib/styles';
 import { uploadAttachment } from '@/lib/uploadAttachment';
 import { OptionDropdown } from '@/components/OptionDropdown';
 import { PRIORITY_CONFIG } from '@/lib/ticketPriority';
 import { TYPE_CONFIG } from '@/lib/ticketType';
 
 interface CcCandidate {
+  id: string;
+  name: string;
+}
+
+interface TicketGroupOption {
   id: string;
   name: string;
 }
@@ -25,6 +30,8 @@ export function NewTicketForm() {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TicketPriority>('normal');
   const [type, setType] = useState<TicketType>('other');
+  const [groups, setGroups] = useState<TicketGroupOption[]>([]);
+  const [groupId, setGroupId] = useState('');
 
   const [ccQuery, setCcQuery] = useState('');
   const [ccResults, setCcResults] = useState<CcCandidate[]>([]);
@@ -35,6 +42,13 @@ export function NewTicketForm() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/ticket-groups')
+      .then((res) => (res.ok ? res.json() : { data: [] }))
+      .then((body) => setGroups(body.data ?? []))
+      .catch(() => setGroups([]));
+  }, []);
 
   useEffect(() => {
     if (ccQuery.trim().length < CC_MIN_QUERY_LENGTH) {
@@ -82,6 +96,7 @@ export function NewTicketForm() {
         description,
         priority,
         type,
+        groupId: groupId || null,
         ccUserIds: selectedCc.map((c) => c.id),
       }),
     });
@@ -135,6 +150,18 @@ export function NewTicketForm() {
           <OptionDropdown value={type} options={TICKET_TYPES} config={TYPE_CONFIG} onChange={setType} />
         </label>
       </div>
+
+      <label className={label}>
+        Send to
+        <select className={selectStyle} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+          <option value="">Not sure (goes to admins)</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <div className={label}>
         CC (search by name)

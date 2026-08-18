@@ -45,6 +45,7 @@ interface TagOption {
 
 interface AdminTicketControlsProps {
   ticketId: string;
+  groupId: string | null;
   currentStatus: string;
   currentPriority: string;
   currentType: string;
@@ -66,6 +67,7 @@ function toDatetimeLocal(iso: string | null): string {
 
 export function AdminTicketControls({
   ticketId,
+  groupId,
   currentStatus,
   currentPriority,
   currentType,
@@ -95,13 +97,14 @@ export function AdminTicketControls({
       return;
     }
     const handle = setTimeout(() => {
-      fetch(`/api/users/admins?q=${encodeURIComponent(query)}`)
+      const groupParam = groupId ? `&groupId=${encodeURIComponent(groupId)}` : '';
+      fetch(`/api/users/admins?q=${encodeURIComponent(query)}${groupParam}`)
         .then((res) => (res.ok ? res.json() : { data: [] }))
         .then((body) => setAssigneeResults(body.data ?? []))
         .catch(() => setAssigneeResults([]));
     }, ASSIGNEE_SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(handle);
-  }, [assigneeQuery]);
+  }, [assigneeQuery, groupId]);
 
   async function update(patch: Record<string, unknown>) {
     setIsSaving(true);
@@ -246,7 +249,7 @@ export function AdminTicketControls({
       </div>
 
       <div className={`flex flex-col gap-2 ${isClosed ? 'pointer-events-none opacity-50' : ''}`}>
-        <span className={mutedText}>Assignees (admins only):</span>
+        <span className={mutedText}>Assignees (admins and group members):</span>
         <div className="flex flex-wrap items-center gap-2">
           {selectedAssignees.map((admin) => (
             <span
