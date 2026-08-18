@@ -116,6 +116,19 @@ export async function listTicketsForUser(userId: string) {
   });
 }
 
+/**
+ * "Incoming" tab: every ticket routed to a group the user belongs to (regardless of who
+ * created/CC'd it or is assigned) -- distinct from listTicketsForUser, which is scoped to
+ * tickets the caller personally submitted or is CC'd on.
+ */
+export async function listTicketsForGroupQueue(userId: string) {
+  return prisma.ticket.findMany({
+    where: { group: { members: { some: { id: userId } } } },
+    orderBy: { updatedAt: 'desc' },
+    include: { createdBy: true, assignees: true, tags: true, watchers: true, group: true },
+  });
+}
+
 /** Full admin queue: every ticket, with filters. Callers must gate this behind requireAdmin(). */
 export async function listTicketsForAdminQueue(filters: TicketQueueFilters = {}) {
   const where: Prisma.TicketWhereInput = {};
@@ -262,6 +275,7 @@ export async function getTicketOr404(ticketId: string) {
       assignees: true,
       tags: true,
       watchers: true,
+      group: { include: { members: { select: { id: true } } } },
       attachments: { orderBy: { createdAt: 'asc' }, include: { uploadedBy: true } },
       messages: { orderBy: { createdAt: 'asc' }, include: { author: true } },
       history: { orderBy: { createdAt: 'desc' }, include: { actor: true } },
@@ -271,8 +285,19 @@ export async function getTicketOr404(ticketId: string) {
   return ticket;
 }
 
+interface TicketGroupContext {
+  groupId?: string | null;
+  group?: { members?: { id: string }[] } | null;
+}
+
+/** True if the user belongs to the TicketGroup this ticket is routed to. False for "unsure" (groupId null) tickets -- those are admin-only, same as before groups existed. */
+export function isTicketGroupMember(ticket: TicketGroupContext, userId: string): boolean {
+  if (!ticket.groupId || !ticket.group) return false;
+  return (ticket.group.members ?? []).some((m) => m.id === userId);
+}
+
 export function canViewTicket(
-  ticket: { createdById: string; assignees?: { id: string }[]; watchers?: { id: string }[] },
+  ticket: { createdById: string; assignees?: { id: string }[]; watchers?: { id: string }[] } & TicketGroupContext,
   user: { id: string; role: 'user' | 'admin' } | null,
 ): boolean {
   if (!user) return false;
@@ -280,8 +305,17 @@ export function canViewTicket(
   return (
     ticket.createdById === user.id ||
     (ticket.assignees ?? []).some((a) => a.id === user.id) ||
-    (ticket.watchers ?? []).some((w) => w.id === user.id)
+    (ticket.watchers ?? []).some((w) => w.id === user.id) ||
+    isTicketGroupMember(ticket, user.id)
   );
+}
+
+/** Group members may edit the ticket like an admin, except for internal notes (still admin-only -- gated separately, not here). */
+export function canManageTicket(
+  ticket: TicketGroupContext,
+  user: { id: string; role: 'user' | 'admin' },
+): boolean {
+  return user.role === 'admin' || isTicketGroupMember(ticket, user.id);
 }
 
 export async function verifyTicketToken(ticketId: string, token: string): Promise<boolean> {
@@ -363,14 +397,28 @@ export async function createTicket(
     if (ccUsers.length !== ccUserIds.length) throw new AppError('One or more CC users not found');
   }
 
+  // groupId null/undefined = "unsure" -- routed to admins only, unchanged from pre-groups behavior.
+  let group: { id: string; members: { id: string }[] } | null = null;
+  if (input.groupId) {
+    group = await prisma.ticketGroup.findUnique({
+      where: { id: input.groupId },
+      include: { members: { select: { id: true } } },
+    });
+    if (!group) throw new AppError('Group not found');
+  }
+
   const assigneeIds = input.assigneeIds ?? [];
   if (assigneeIds.length > 0) {
     if (actorRole !== 'admin') {
       throw new AppError('Only admins can assign a ticket at creation time');
     }
+    const groupMemberIds = new Set((group?.members ?? []).map((m) => m.id));
     const assignees = await prisma.user.findMany({ where: { id: { in: assigneeIds } } });
-    if (assignees.length !== assigneeIds.length || assignees.some((a) => a.role !== 'admin')) {
-      throw new AppError('Tickets can only be assigned to admins');
+    const allValid =
+      assignees.length === assigneeIds.length &&
+      assignees.every((a) => a.role === 'admin' || groupMemberIds.has(a.id));
+    if (!allValid) {
+      throw new AppError('Tickets can only be assigned to admins or members of the ticket\'s group');
     }
   }
 
@@ -384,6 +432,7 @@ export async function createTicket(
         priority: input.priority,
         type: input.type,
         createdById: userId,
+        groupId: group?.id,
         watchers: ccUserIds.length > 0 ? { connect: ccUserIds.map((id) => ({ id })) } : undefined,
         assignees:
           assigneeIds.length > 0 ? { connect: assigneeIds.map((id) => ({ id })) } : undefined,
@@ -671,6 +720,8 @@ interface PreviousTicketState {
   slaDueAt: Date | null;
   tags: { id: string; name: string }[];
   watchers: { id: string; name: string }[];
+  groupId: string | null;
+  group: { name: string } | null;
 }
 
 /** Diffs the pre-update ticket state against the patch (and the post-update relations, for
@@ -678,7 +729,7 @@ interface PreviousTicketState {
 function buildTicketHistoryEntries(
   previous: PreviousTicketState,
   input: UpdateTicketInput,
-  updated: { tags: { id: string; name: string }[]; watchers: { id: string; name: string }[] },
+  updated: { tags: { id: string; name: string }[]; watchers: { id: string; name: string }[]; group: { name: string } | null },
 ): TicketHistoryEntryInput[] {
   const entries: TicketHistoryEntryInput[] = [];
 
@@ -721,6 +772,12 @@ function buildTicketHistoryEntries(
     }
   }
 
+  if (input.groupId !== undefined && input.groupId !== previous.groupId) {
+    const label = updated.group?.name ?? 'Unsure (admin only)';
+    const fromLabel = previous.group?.name ?? 'Unsure (admin only)';
+    entries.push({ field: 'group', action: 'changed', fromValue: fromLabel, toValue: label });
+  }
+
   return entries;
 }
 
@@ -731,6 +788,8 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
       status: true,
       priority: true,
       slaDueAt: true,
+      groupId: true,
+      group: { select: { name: true } },
       tags: { select: { id: true, name: true } },
       watchers: { select: { id: true, name: true } },
     },
@@ -749,11 +808,33 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
   if (input.priority) data.priority = input.priority;
   if (input.type) data.type = input.type;
 
+  if (input.groupId !== undefined) {
+    if (input.groupId) {
+      const group = await prisma.ticketGroup.findUnique({ where: { id: input.groupId } });
+      if (!group) throw new AppError('Group not found');
+    }
+    data.group = input.groupId ? { connect: { id: input.groupId } } : { disconnect: true };
+  }
+
   if (input.assigneeIds !== undefined) {
     if (input.assigneeIds.length > 0) {
+      const targetGroupId = input.groupId !== undefined ? input.groupId : previous.groupId;
+      const groupMemberIds = targetGroupId
+        ? new Set(
+            (
+              await prisma.ticketGroup.findUnique({
+                where: { id: targetGroupId },
+                include: { members: { select: { id: true } } },
+              })
+            )?.members.map((m) => m.id) ?? [],
+          )
+        : new Set<string>();
       const assignees = await prisma.user.findMany({ where: { id: { in: input.assigneeIds } } });
-      if (assignees.length !== input.assigneeIds.length || assignees.some((a) => a.role !== 'admin')) {
-        throw new AppError('Tickets can only be assigned to admins');
+      const allValid =
+        assignees.length === input.assigneeIds.length &&
+        assignees.every((a) => a.role === 'admin' || groupMemberIds.has(a.id));
+      if (!allValid) {
+        throw new AppError('Tickets can only be assigned to admins or members of the ticket\'s group');
       }
     }
     data.assignees = { set: input.assigneeIds.map((id) => ({ id })) };
@@ -776,7 +857,7 @@ export async function updateTicket(ticketId: string, input: UpdateTicketInput, a
   const ticket = await prisma.ticket.update({
     where: { id: ticketId },
     data,
-    include: { tags: true, assignees: true, createdBy: true, watchers: true },
+    include: { tags: true, assignees: true, createdBy: true, watchers: true, group: { select: { name: true } } },
   });
 
   await writeAuditLog(actorId, 'ticket.update', 'Ticket', ticketId, input as Prisma.InputJsonValue);
