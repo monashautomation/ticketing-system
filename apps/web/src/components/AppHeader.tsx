@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { BarChart3, Inbox, Settings, Tag as TagIcon, Ticket } from 'lucide-react';
+import { BarChart3, Inbox, LayoutList, Settings, Tag as TagIcon, Ticket, Users } from 'lucide-react';
 import { getCurrentSession } from '@/lib/session';
 import { listTicketGroupsForUser } from '@/server/ticketGroups';
 import { SignInButton } from '@/components/SignInButton';
@@ -58,7 +58,7 @@ export async function AppHeader() {
             {role === 'admin' && (
               <>
                 <Link href="/admin" className={`${navLink} inline-flex items-center gap-1.5`}>
-                  <Inbox className="h-4 w-4" />
+                  <LayoutList className="h-4 w-4" />
                   Admin Queue
                 </Link>
                 <Link href="/admin/metrics" className={`${navLink} inline-flex items-center gap-1.5`}>
@@ -68,6 +68,10 @@ export async function AppHeader() {
                 <Link href="/admin/tags" className={`${navLink} inline-flex items-center gap-1.5`}>
                   <TagIcon className="h-4 w-4" />
                   Tags
+                </Link>
+                <Link href="/admin/ticket-groups" className={`${navLink} inline-flex items-center gap-1.5`}>
+                  <Users className="h-4 w-4" />
+                  Groups
                 </Link>
                 <Link href="/admin/settings" className={`${navLink} inline-flex items-center gap-1.5`}>
                   <Settings className="h-4 w-4" />

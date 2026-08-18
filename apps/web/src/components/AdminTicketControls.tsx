@@ -249,7 +249,7 @@ export function AdminTicketControls({
       </div>
 
       <div className={`flex flex-col gap-2 ${isClosed ? 'pointer-events-none opacity-50' : ''}`}>
-        <span className={mutedText}>Assignees (admins and group members):</span>
+        <span className={mutedText}>Assignees:</span>
         <div className="flex flex-wrap items-center gap-2">
           {selectedAssignees.map((admin) => (
             <span
@@ -272,7 +272,7 @@ export function AdminTicketControls({
         <div className="relative max-w-xs">
           <input
             className={input}
-            placeholder="Search admins by name…"
+            placeholder="Search by name…"
             value={assigneeQuery}
             disabled={isSaving}
             onChange={(e) => setAssigneeQuery(e.target.value)}

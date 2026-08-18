@@ -115,8 +115,12 @@ export function TicketGroupsManager({ initialGroups, authentikGroupNames }: Tick
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
-        {groups.map((group) => (
-          <div key={group.id} className={`${cardTight} flex items-center justify-between gap-4`}>
+        {groups.map((group, index) => (
+          <div
+            key={group.id}
+            className={`${cardTight} flex animate-fade-in-up items-center justify-between gap-4`}
+            style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
+          >
             <div>
               <p className="font-medium text-text">{group.name}</p>
               <p className={mutedText}>
@@ -156,17 +160,25 @@ export function TicketGroupsManager({ initialGroups, authentikGroupNames }: Tick
 
         <div className={label}>
           Linked Authentik groups
-          <div className="flex flex-wrap gap-2 rounded-md border border-border p-2">
-            {authentikGroupNames.map((name) => (
-              <label key={name} className="flex items-center gap-1.5 text-sm text-text-secondary">
-                <input
-                  type="checkbox"
-                  checked={form.authentikGroupNames.includes(name)}
-                  onChange={() => toggleAuthentikGroup(name)}
-                />
-                {name}
-              </label>
-            ))}
+          <div className="flex flex-wrap gap-1.5 rounded-md border border-border p-2">
+            {authentikGroupNames.map((name) => {
+              const selected = form.authentikGroupNames.includes(name);
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => toggleAuthentikGroup(name)}
+                  aria-pressed={selected}
+                  className={
+                    selected
+                      ? 'rounded-full border border-accent bg-accent-soft px-3 py-1 text-xs font-medium text-accent transition-colors'
+                      : 'rounded-full border border-border px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-border-strong hover:text-text'
+                  }
+                >
+                  {name}
+                </button>
+              );
+            })}
             {authentikGroupNames.length === 0 && <span className={mutedText}>No Authentik groups found.</span>}
           </div>
           <span className={mutedText}>
