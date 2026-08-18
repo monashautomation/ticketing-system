@@ -3,7 +3,7 @@ import { updateTicketSchema, updateWatchersSchema } from '@ticketing/shared';
 import { handleApiError } from '@/lib/api-errors';
 import { requireSession } from '@/lib/session';
 import { AppError, ForbiddenError } from '@/lib/errors';
-import { canViewTicket, getTicketOr404, updateTicket, verifyTicketToken } from '@/server/tickets';
+import { canManageTicket, canViewTicket, getTicketOr404, updateTicket, verifyTicketToken } from '@/server/tickets';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -54,6 +54,15 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     }
 
     const ticket = await getTicketOr404(id);
+
+    if (canManageTicket(ticket, user)) {
+      // Group members get the same edit surface as admins, except reassigning which group the
+      // ticket belongs to -- that stays an admin-only call, same as the "unsure" triage step.
+      const { groupId: _ignoredGroupId, ...rest } = updateTicketSchema.parse(rawBody);
+      const updated = await updateTicket(id, rest, user.id);
+      return NextResponse.json({ success: true, data: updated });
+    }
+
     if (ticket.createdById !== user.id) throw new ForbiddenError();
 
     const { watcherIds } = updateWatchersSchema.parse(rawBody);
