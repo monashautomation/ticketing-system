@@ -43,6 +43,11 @@ interface TagOption {
   color: string;
 }
 
+interface GroupOption {
+  id: string;
+  name: string;
+}
+
 interface AdminTicketControlsProps {
   ticketId: string;
   groupId: string | null;
@@ -54,6 +59,8 @@ interface AdminTicketControlsProps {
   currentTagIds: string[];
   currentWatchers: AdminOption[];
   tags: TagOption[];
+  groups: GroupOption[];
+  isAdmin: boolean;
 }
 
 const ASSIGNEE_SEARCH_DEBOUNCE_MS = 250;
@@ -76,9 +83,12 @@ export function AdminTicketControls({
   currentTagIds,
   currentWatchers,
   tags,
+  groups,
+  isAdmin,
 }: AdminTicketControlsProps) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(groupId);
   const [slaDueAt, setSlaDueAt] = useState(toDatetimeLocal(currentSlaDueAt));
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>(currentTagIds);
   const [selectedAssignees, setSelectedAssignees] = useState<AdminOption[]>(currentAssignees);
@@ -97,14 +107,20 @@ export function AdminTicketControls({
       return;
     }
     const handle = setTimeout(() => {
-      const groupParam = groupId ? `&groupId=${encodeURIComponent(groupId)}` : '';
+      const groupParam = selectedGroupId ? `&groupId=${encodeURIComponent(selectedGroupId)}` : '';
       fetch(`/api/users/admins?q=${encodeURIComponent(query)}${groupParam}`)
         .then((res) => (res.ok ? res.json() : { data: [] }))
         .then((body) => setAssigneeResults(body.data ?? []))
         .catch(() => setAssigneeResults([]));
     }, ASSIGNEE_SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(handle);
-  }, [assigneeQuery, groupId]);
+  }, [assigneeQuery, selectedGroupId]);
+
+  function changeGroup(nextGroupId: string) {
+    const normalized = nextGroupId === '' ? null : nextGroupId;
+    setSelectedGroupId(normalized);
+    update({ groupId: normalized });
+  }
 
   async function update(patch: Record<string, unknown>) {
     setIsSaving(true);
@@ -220,6 +236,25 @@ export function AdminTicketControls({
             onChange={(type) => update({ type })}
           />
         </label>
+
+        {isAdmin && (
+          <label className={labelInline}>
+            Group
+            <select
+              className={selectStyle}
+              value={selectedGroupId ?? ''}
+              disabled={isSaving || isClosed}
+              onChange={(e) => changeGroup(e.target.value)}
+            >
+              <option value="">Unsure</option>
+              {groups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <label className={labelInline}>
           SLA due

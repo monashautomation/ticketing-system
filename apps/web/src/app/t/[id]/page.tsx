@@ -4,6 +4,7 @@ import { getCurrentSession } from '@/lib/session';
 import { canManageTicket, canViewTicket, getTicketOr404, isOverdue, verifyTicketToken } from '@/server/tickets';
 import { markTicketNotificationsRead } from '@/server/notifications';
 import { listTags } from '@/server/tags';
+import { listTicketGroups } from '@/server/ticketGroups';
 import { AppHeader } from '@/components/AppHeader';
 import { TicketThread } from '@/components/TicketThread';
 import { AdminTicketControls } from '@/components/AdminTicketControls';
@@ -138,6 +139,8 @@ export default async function TicketPage({ params, searchParams }: PageProps) {
           currentTagIds={ticket.tags.map((t) => t.id)}
           currentWatchers={ticket.watchers.map((w) => ({ id: w.id, name: w.name }))}
           tags={await listTags()}
+          groups={isAdmin ? (await listTicketGroups()).map((g) => ({ id: g.id, name: g.name })) : []}
+          isAdmin={isAdmin}
         />
       )}
 
