@@ -31,6 +31,7 @@ Compared with `timingSafeEqual`. Mismatch or missing header → `401`.
   "priority": "normal",                   // optional, enum, defaults "normal"
   "type": "other",                        // optional, enum, defaults "other"
   "discordChannelId": "987654321098765432", // optional
+  "groupId": "clx...",                    // optional, from GET /api/internal/ticket-groups; null/omitted = "unsure", routed to admins only
   "idempotencyKey": "a uuid you generate per /ticket interaction" // optional but strongly recommended -- see Reliability below
 }
 ```
@@ -51,6 +52,14 @@ have succeeded server-side. Always:
    than once.
 
 Do not retry on `400` (validation error) -- that will never succeed with the same body.
+
+## Destination/group picker
+
+`GET /api/internal/ticket-groups` (same `x-internal-secret` auth, no body) returns
+`{ "success": true, "data": [{ "id": "clx...", "name": "Networking" }, ...] }`. Use this to back a
+Discord autocomplete option on `/ticket` (poll/cache client-side, e.g. every few minutes, rather
+than hitting it per keystroke) so new groups show up without redeploying the bot's slash command.
+Offer a synthetic "Unsure / let admins triage" choice that omits `groupId` from the create call.
 
 ## Response
 
