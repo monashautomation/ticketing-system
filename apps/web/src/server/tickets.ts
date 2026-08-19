@@ -514,6 +514,12 @@ async function resolveDiscordTicketOwner(
 export async function createTicketFromDiscord(input: CreateInternalTicketInput, baseUrl: string) {
   const { owner, isNewUser } = await resolveDiscordTicketOwner(input.discordUserId, input.discordUsername);
 
+  // groupId null/undefined = "unsure" -- routed to admins only, same as createTicket().
+  if (input.groupId) {
+    const group = await prisma.ticketGroup.findUnique({ where: { id: input.groupId } });
+    if (!group) throw new AppError('Group not found');
+  }
+
   const ticket = await prisma.$transaction(async (tx) => {
     const incidentNumber = await nextIncidentNumber(tx);
     return tx.ticket.create({
@@ -524,6 +530,7 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
         priority: input.priority,
         type: input.type,
         createdById: owner.id,
+        groupId: input.groupId ?? undefined,
         discordChannelId: input.discordChannelId,
         // Ticket.status defaults to 'open', which is in the active-reminder status set --
         // stamp the clock at creation so the 24h assignee reminder sweep has a start point.
