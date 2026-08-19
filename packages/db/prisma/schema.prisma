@@ -180,6 +180,10 @@ model Ticket {
   groupId           String?
   group             TicketGroup? @relation(fields: [groupId], references: [id])
   discordChannelId  String?
+  /// Client-generated key from the Discord bot's /ticket interaction, unique per submission.
+  /// Lets createTicketFromDiscord detect a retried request and return the existing ticket
+  /// instead of creating a duplicate.
+  discordIdempotencyKey String? @unique
   slaDueAt          DateTime?
   resolvedAt        DateTime?
   /// Set when status transitions into `pending`; cleared when it leaves. Drives the

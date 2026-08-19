@@ -17,6 +17,9 @@ export const createInternalTicketSchema = createTicketSchema.extend({
   discordUserId: z.string().min(1),
   discordUsername: z.string().min(1),
   discordChannelId: z.string().optional(),
+  /** Client-generated key (e.g. uuid per Discord interaction) -- lets the bot safely retry
+   * a failed/timed-out create without producing a duplicate ticket. */
+  idempotencyKey: z.string().min(1).max(100).optional(),
 });
 export type CreateInternalTicketInput = z.infer<typeof createInternalTicketSchema>;
 

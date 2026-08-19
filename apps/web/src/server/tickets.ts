@@ -520,6 +520,26 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
     if (!group) throw new AppError('Group not found');
   }
 
+  if (input.idempotencyKey) {
+    const existing = await prisma.ticket.findUnique({
+      where: { discordIdempotencyKey: input.idempotencyKey },
+    });
+    // A bot retry after a dropped response lands here -- ticket already exists, so mint a
+    // fresh access link without repeating the audit log, channel announcement, or DM (those
+    // already fired on the original successful create).
+    if (existing) {
+      const rawToken = randomBytes(32).toString('hex');
+      await prisma.ticketAccessToken.create({
+        data: {
+          ticketId: existing.id,
+          tokenHash: hashToken(rawToken),
+          expiresAt: new Date(Date.now() + TICKET_TOKEN_TTL_MS),
+        },
+      });
+      return { ticket: existing, path: `/t/${existing.id}?token=${rawToken}`, isNewUser: false };
+    }
+  }
+
   const ticket = await prisma.$transaction(async (tx) => {
     const incidentNumber = await nextIncidentNumber(tx);
     return tx.ticket.create({
@@ -532,6 +552,7 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
         createdById: owner.id,
         groupId: input.groupId ?? undefined,
         discordChannelId: input.discordChannelId,
+        discordIdempotencyKey: input.idempotencyKey,
         // Ticket.status defaults to 'open', which is in the active-reminder status set --
         // stamp the clock at creation so the 24h assignee reminder sweep has a start point.
         activeSince: new Date(),

@@ -30,11 +30,27 @@ Compared with `timingSafeEqual`. Mismatch or missing header → `401`.
   "description": "Ticket description",    // 1-4000 chars
   "priority": "normal",                   // optional, enum, defaults "normal"
   "type": "other",                        // optional, enum, defaults "other"
-  "discordChannelId": "987654321098765432" // optional
+  "discordChannelId": "987654321098765432", // optional
+  "idempotencyKey": "a uuid you generate per /ticket interaction" // optional but strongly recommended -- see Reliability below
 }
 ```
 
 Validated via `createInternalTicketSchema` (Zod). Invalid body → `400` with `details`.
+
+## Reliability: idempotency key
+
+Discord gives you ~3s to ack an interaction, but this endpoint can take longer under load. If your
+request times out or the bot process restarts mid-request, **do not assume it failed** -- it may
+have succeeded server-side. Always:
+
+1. `interaction.deferReply()` immediately, before calling this endpoint.
+2. Generate one uuid per interaction and send it as `idempotencyKey`.
+3. On network error / 5xx, retry (a few attempts, exponential backoff) with the *same* key.
+4. On retry, if the ticket already exists for that key, this endpoint returns the existing ticket
+   (fresh access `url`, `isNewUser: false`) instead of creating a duplicate -- safe to call more
+   than once.
+
+Do not retry on `400` (validation error) -- that will never succeed with the same body.
 
 ## Response
 
