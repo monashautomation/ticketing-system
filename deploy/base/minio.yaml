@@ -111,7 +111,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: minio-init
-          image: minio/mc:latest
+          image: amazon/aws-cli:latest
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -129,5 +129,9 @@ spec:
             - -c
             - |
               set -e
-              until mc alias set local http://ticketing-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do sleep 2; done
-              mc mb -p "local/$S3_BUCKET"
+              export AWS_ACCESS_KEY_ID="$MINIO_ROOT_USER"
+              export AWS_SECRET_ACCESS_KEY="$MINIO_ROOT_PASSWORD"
+              export AWS_DEFAULT_REGION=us-east-1
+              until aws --endpoint-url http://ticketing-minio:9000 s3api list-buckets >/dev/null; do sleep 2; done
+              aws --endpoint-url http://ticketing-minio:9000 s3api head-bucket --bucket "$S3_BUCKET" || \
+                aws --endpoint-url http://ticketing-minio:9000 s3api create-bucket --bucket "$S3_BUCKET"
