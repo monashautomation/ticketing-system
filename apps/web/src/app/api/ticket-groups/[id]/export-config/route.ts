@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { updateGroupExportConfigSchema } from '@ticketing/shared';
 import { handleApiError } from '@/lib/api-errors';
 import { ForbiddenError } from '@/lib/errors';
-import { requireSession } from '@/lib/session';
+import { requireSession, requireWritableSession } from '@/lib/session';
 import { isTicketGroupMember, updateTicketGroupExportConfig } from '@/server/ticketGroups';
 
 interface RouteParams {
@@ -13,7 +13,7 @@ interface RouteParams {
  * same gate as PATCH .../form-config. */
 export async function PATCH(request: Request, { params }: RouteParams) {
   try {
-    const session = await requireSession();
+    const session = await requireWritableSession();
     const { id } = await params;
 
     if (session.user.role !== 'admin' && !(await isTicketGroupMember(session.user.id, id))) {

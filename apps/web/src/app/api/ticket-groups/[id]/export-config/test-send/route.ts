@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { testSendExportSchema, type GroupExportConfig, type TicketExportSnapshot } from '@ticketing/shared';
 import { handleApiError } from '@/lib/api-errors';
 import { AppError, ForbiddenError } from '@/lib/errors';
-import { requireSession } from '@/lib/session';
+import { requireSession, requireWritableSession } from '@/lib/session';
 import { getTicketGroupOr404, isTicketGroupMember } from '@/server/ticketGroups';
 import { sendTicketExportTestRow } from '@/server/ticketExportDelivery';
 
@@ -15,7 +15,7 @@ interface RouteParams {
  * bypasses the TicketExportJob outbox entirely (see sendTicketExportTestRow). */
 export async function POST(request: Request, { params }: RouteParams) {
   try {
-    const session = await requireSession();
+    const session = await requireWritableSession();
     const { id } = await params;
 
     if (session.user.role !== 'admin' && !(await isTicketGroupMember(session.user.id, id))) {

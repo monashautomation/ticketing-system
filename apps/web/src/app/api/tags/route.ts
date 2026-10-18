@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createTagSchema } from '@ticketing/shared';
 import { handleApiError } from '@/lib/api-errors';
-import { requireAdmin, requireSession } from '@/lib/session';
+import { requireAdmin, requireSession, requireWritableAdmin } from '@/lib/session';
 import { createTag, listTags } from '@/server/tags';
 
 export async function GET() {
@@ -16,7 +16,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireAdmin();
+    const session = await requireWritableAdmin();
     const body = createTagSchema.parse(await request.json());
     const tag = await createTag(body, session.user.id);
     return NextResponse.json({ success: true, data: tag }, { status: 201 });

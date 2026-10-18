@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { handleApiError } from '@/lib/api-errors';
-import { requireAdmin } from '@/lib/session';
+import { requireAdmin, requireWritableAdmin } from '@/lib/session';
 import { deleteTag } from '@/server/tags';
 
 interface RouteParams {
@@ -9,7 +9,7 @@ interface RouteParams {
 
 export async function DELETE(_request: Request, { params }: RouteParams) {
   try {
-    const session = await requireAdmin();
+    const session = await requireWritableAdmin();
     const { id } = await params;
     await deleteTag(id, session.user.id);
     return NextResponse.json({ success: true, data: null });

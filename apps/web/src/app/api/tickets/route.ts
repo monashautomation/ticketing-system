@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createTicketSchema } from '@ticketing/shared';
 import { handleApiError } from '@/lib/api-errors';
-import { requireSession } from '@/lib/session';
+import { requireSession, requireWritableSession } from '@/lib/session';
 import { createTicket, listTicketsForUser } from '@/server/tickets';
 
 export async function GET() {
@@ -16,7 +16,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireSession();
+    const session = await requireWritableSession();
     const body = createTicketSchema.parse(await request.json());
     const ticket = await createTicket(session.user.id, session.user.role as 'user' | 'admin', body);
     return NextResponse.json({ success: true, data: ticket }, { status: 201 });

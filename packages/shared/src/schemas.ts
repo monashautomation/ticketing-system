@@ -144,3 +144,11 @@ export const uptimeKumaWebhookSchema = z.object({
   }),
 });
 export type UptimeKumaWebhookInput = z.infer<typeof uptimeKumaWebhookSchema>;
+
+export const createApiTokenSchema = z.object({
+  name: z.string().min(1).max(60),
+  readOnly: z.boolean().optional().default(true),
+  expiresInDays: z.number().int().min(1).max(365).optional(),
+  ownerId: z.string().optional(),
+});
+export type CreateApiTokenInput = z.infer<typeof createApiTokenSchema>;

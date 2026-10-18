@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createMessageSchema } from '@ticketing/shared';
 import { handleApiError } from '@/lib/api-errors';
-import { requireSession } from '@/lib/session';
+import { requireSession, requireWritableSession } from '@/lib/session';
 import { ForbiddenError } from '@/lib/errors';
 import { addMessage, canViewTicket, getTicketOr404, verifyTicketToken } from '@/server/tickets';
 import { publishTicketMessage } from '@/server/ticket-events';
@@ -25,7 +25,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       authorId = ticket.createdById;
       if (body.isInternalNote) throw new ForbiddenError();
     } else {
-      const session = await requireSession();
+      const session = await requireWritableSession();
       const user = { id: session.user.id, role: session.user.role as 'user' | 'admin' };
       if (!canViewTicket(ticket, user)) throw new ForbiddenError();
       if (body.isInternalNote && user.role !== 'admin') throw new ForbiddenError();

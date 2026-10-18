@@ -108,8 +108,30 @@ model User {
   ticketShareLinksCreated TicketShareLink[]
   ticketHistoryEntries    TicketHistory[]
   ticketGroups            TicketGroup[]   @relation("TicketGroupMembers")
+  apiTokens               ApiToken[]
 
   @@map("users")
+}
+
+/// CLI/API bearer token (maticket). The plaintext secret is shown exactly once at
+/// creation; only its SHA-256 hash is stored. Expired/revoked tokens fail closed.
+/// readOnly tokens may call GET endpoints only — enforced in requireWritableSession().
+model ApiToken {
+  id         String    @id @default(cuid())
+  name       String
+  tokenHash  String    @unique
+  preview    String
+  readOnly   Boolean   @default(true)
+  ownerId    String
+  owner      User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  @@index([ownerId])
+  @@index([revokedAt])
+  @@map("api_tokens")
 }
 
 /// BetterAuth core table.
