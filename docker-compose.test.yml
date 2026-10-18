@@ -16,29 +16,32 @@ services:
       retries: 20
 
   minio-test:
-    # Docker Hub denies anonymous pulls of minio/minio -- quay.io is MinIO's own registry.
-    image: quay.io/minio/minio:latest
-    command: server /data
-    environment:
-      MINIO_ROOT_USER: ticketing-test
-      MINIO_ROOT_PASSWORD: ticketing-test-secret
+    # MinIO's public images were pulled from Docker Hub and quay.io (both now 401/denied).
+    # RustFS is an S3-compatible drop-in that honors the MINIO_ROOT_* env aliases.
+    image: rustfs/rustfs:latest
+    command: /usr/bin/rustfs --access-key ticketing-test --secret-key ticketing-test-secret /data
     ports:
       - '59000:9000'
     tmpfs:
-      - /data
+      # mode 0777: rustfs runs as a non-root user and the tmpfs mounts root-owned
+      - /data:mode=0777
+      - /logs:mode=0777
     healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
+      test: ['CMD', 'curl', '-sf', 'http://localhost:9000/health/ready']
       interval: 2s
       timeout: 5s
       retries: 20
 
   minio-test-init:
-    image: quay.io/minio/mc:latest
+    image: amazon/aws-cli:latest
     depends_on:
       minio-test:
         condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: ticketing-test
+      AWS_SECRET_ACCESS_KEY: ticketing-test-secret
+      AWS_DEFAULT_REGION: us-east-1
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio-test:9000 ticketing-test ticketing-test-secret &&
-      mc mb -p local/ticketing-test
+      aws --endpoint-url http://minio-test:9000 s3 mb s3://ticketing-test || true
       "
