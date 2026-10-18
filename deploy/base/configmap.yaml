@@ -13,6 +13,7 @@ data:
   S3_BUCKET: "ticketing-attachments"
   S3_FORCE_PATH_STYLE: "true"
   NODE_ENV: "production"
+  TZ: "Australia/Melbourne"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -20,6 +21,7 @@ metadata:
   name: ticketing-bot-config
 data:
   INTERNAL_API_URL: "http://ticketing-web"
+  TZ: "Australia/Melbourne"
   DISCORD_DM_API_URL: "http://discordbot-api.discordbot:8000"
   NODE_ENV: "production"
 ---
