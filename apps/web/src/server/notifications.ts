@@ -567,11 +567,34 @@ export async function queueSlaBreachAlerts(baseUrl: string): Promise<number> {
   return tickets.length;
 }
 
+/**
+ * Hands out queued DMs to the bot for delivery. Claiming is ATOMIC per row (same rationale as
+ * listPendingDiscordChannelMessages): a row is only returned to the caller whose conditional
+ * UPDATE flipped it from sentAt=null to sentAt=now. At-most-once — a duplicate DM to a person is
+ * spam, so we accept losing a DM to a crash between claim and send instead.
+ */
 export async function listPendingDiscordDms(limit = 25) {
-  return prisma.discordDm.findMany({
+  const candidates = await prisma.discordDm.findMany({
     where: { sentAt: null },
     orderBy: { createdAt: 'asc' },
+    select: { id: true },
     take: limit,
+  });
+  if (candidates.length === 0) return [];
+
+  const claimedIds: string[] = [];
+  for (const { id } of candidates) {
+    const claimed = await prisma.discordDm.updateMany({
+      where: { id, sentAt: null },
+      data: { sentAt: new Date() },
+    });
+    if (claimed.count === 1) claimedIds.push(id);
+  }
+  if (claimedIds.length === 0) return [];
+
+  return prisma.discordDm.findMany({
+    where: { id: { in: claimedIds } },
+    orderBy: { createdAt: 'asc' },
   });
 }
 
@@ -583,11 +606,42 @@ export async function markDiscordDmsSent(ids: string[]): Promise<void> {
   });
 }
 
+/**
+ * Hands out queued channel messages to the bot for delivery. Claiming is ATOMIC: each row is
+ * flipped from sentAt=null to sentAt=now inside its own conditional UPDATE, and only the caller
+ * whose UPDATE actually won the row (count === 1) receives it.
+ *
+ * This is deliberate at-most-once semantics. The previous version returned raw unclaimed rows
+ * and relied on the bot calling markDiscordChannelMessagesSent after the whole send loop, so any
+ * poll that overlapped a slow loop re-fetched the still-unmarked rows and re-posted them — one
+ * burst of 9 tickets produced 85 duplicate announcements in #systems-and-infrastructure on
+ * 2026-10-18. A message lost to a crash between claim and send is strictly preferable to a
+ * duplicate reaching the channel: never spam.
+ *
+ * markDiscordChannelMessagesSent is kept for the bot's existing call and stays idempotent.
+ */
 export async function listPendingDiscordChannelMessages(limit = 25) {
-  return prisma.discordChannelMessage.findMany({
+  const candidates = await prisma.discordChannelMessage.findMany({
     where: { sentAt: null },
     orderBy: { createdAt: 'asc' },
+    select: { id: true },
     take: limit,
+  });
+  if (candidates.length === 0) return [];
+
+  const claimedIds: string[] = [];
+  for (const { id } of candidates) {
+    const claimed = await prisma.discordChannelMessage.updateMany({
+      where: { id, sentAt: null },
+      data: { sentAt: new Date() },
+    });
+    if (claimed.count === 1) claimedIds.push(id);
+  }
+  if (claimedIds.length === 0) return [];
+
+  return prisma.discordChannelMessage.findMany({
+    where: { id: { in: claimedIds } },
+    orderBy: { createdAt: 'asc' },
   });
 }
 
