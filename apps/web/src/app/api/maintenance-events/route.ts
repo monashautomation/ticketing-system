@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { handleApiError } from '@/lib/api-errors';
-import { requireAdmin } from '@/lib/session';
+import { requireAdmin, requireWritableAdmin } from '@/lib/session';
 import { createManualMaintenanceEvent, listPublicMaintenanceEvents } from '@/server/maintenance';
 
 const createSchema = z.object({
@@ -22,7 +22,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireAdmin();
+    await requireWritableAdmin();
     const body = createSchema.parse(await request.json());
     const event = await createManualMaintenanceEvent(body);
     return NextResponse.json({ success: true, data: event }, { status: 201 });

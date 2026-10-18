@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { updateDiscordSettingsSchema } from '@ticketing/shared';
 import { handleApiError } from '@/lib/api-errors';
-import { requireAdmin } from '@/lib/session';
+import { requireAdmin, requireWritableAdmin } from '@/lib/session';
 import { getDiscordSettings, updateDiscordSettings } from '@/server/discordSettings';
 
 export async function GET() {
@@ -16,7 +16,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const session = await requireAdmin();
+    const session = await requireWritableAdmin();
     const body = updateDiscordSettingsSchema.parse(await request.json());
     const settings = await updateDiscordSettings(body, session.user.id);
     return NextResponse.json({ success: true, data: settings });

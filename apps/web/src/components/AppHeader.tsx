@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { BarChart3, Inbox, LayoutList, Settings, Tag as TagIcon, Ticket, Users } from 'lucide-react';
+import { BarChart3, Inbox, KeyRound, LayoutList, Settings, Tag as TagIcon, Ticket, Users } from 'lucide-react';
 import { getCurrentSession } from '@/lib/session';
 import { listTicketGroupsForUser } from '@/server/ticketGroups';
 import { SignInButton } from '@/components/SignInButton';
@@ -55,6 +55,10 @@ export async function AppHeader() {
                 Incoming
               </Link>
             )}
+            <Link href="/api-tokens" className={`${navLink} inline-flex items-center gap-1.5`}>
+              <KeyRound className="h-4 w-4" />
+              API Tokens
+            </Link>
             {role === 'admin' && (
               <>
                 <Link href="/admin" className={`${navLink} inline-flex items-center gap-1.5`}>

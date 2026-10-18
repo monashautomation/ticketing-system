@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { updateTicketSchema, updateWatchersSchema } from '@ticketing/shared';
 import { handleApiError } from '@/lib/api-errors';
-import { requireSession } from '@/lib/session';
+import { requireSession, requireWritableSession } from '@/lib/session';
 import { AppError, ForbiddenError } from '@/lib/errors';
 import { canManageTicket, canViewTicket, getTicketOr404, updateTicket, verifyTicketToken } from '@/server/tickets';
 
@@ -43,7 +43,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 export async function PATCH(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const session = await requireSession();
+    const session = await requireWritableSession();
     const user = { id: session.user.id, role: session.user.role as 'user' | 'admin' };
     const rawBody = await request.json();
 

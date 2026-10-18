@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { handleApiError } from '@/lib/api-errors';
-import { requireSession } from '@/lib/session';
+import { requireSession, requireWritableSession } from '@/lib/session';
 import { ForbiddenError } from '@/lib/errors';
 import { canShareTicket, createTicketShareLink, getTicketOr404 } from '@/server/tickets';
 
@@ -11,7 +11,7 @@ interface RouteParams {
 export async function POST(_request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const session = await requireSession();
+    const session = await requireWritableSession();
     const user = { id: session.user.id, role: session.user.role as 'user' | 'admin' };
 
     const ticket = await getTicketOr404(id);
