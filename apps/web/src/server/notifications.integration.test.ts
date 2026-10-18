@@ -8,7 +8,6 @@ import {
   listNotificationsForUser,
   listPendingDiscordDms,
   markAllNotificationsRead,
-  markDiscordDmsSent,
   markNotificationRead,
   markTicketNotificationsRead,
   queuePendingEscalationDms,
@@ -415,10 +414,10 @@ describe('Discord DM queue plumbing', () => {
     const pending = await listPendingDiscordDms();
     expect(pending.map((dm) => dm.id)).toEqual([first.id, second.id]);
 
-    await markDiscordDmsSent([first.id]);
-
+    // Claim-on-fetch semantics: handing rows out marks them claimed (sentAt set) atomically,
+    // so a second poll never re-delivers them — duplicate DMs are spam.
     const stillPending = await listPendingDiscordDms();
-    expect(stillPending.map((dm) => dm.id)).toEqual([second.id]);
+    expect(stillPending).toEqual([]);
 
     const sentDm = await prisma.discordDm.findUniqueOrThrow({ where: { id: first.id } });
     expect(sentDm.sentAt).not.toBeNull();

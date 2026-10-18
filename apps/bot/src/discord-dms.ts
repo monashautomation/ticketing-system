@@ -45,20 +45,30 @@ function markDiscordDmsSent(ids: string[]) {
  * DMs closed) -- same "best effort, never retry forever" tradeoff as the ephemeral-reply DM in
  * commands/ticket.ts.
  */
+let dmLoopRunning = false;
 export async function processPendingDiscordDms(): Promise<void> {
-  const pending = await listPendingDiscordDms();
-  if (pending.length === 0) return;
-
-  const sentIds: string[] = [];
-  for (const dm of pending) {
-    try {
-      await sendDiscordDm(dm.discordUserId, dm.message);
-    } catch (error) {
-      logger.error(`Failed to send Discord DM ${dm.id} to ${dm.discordUserId}`, error);
-    } finally {
-      sentIds.push(dm.id);
-    }
+  if (dmLoopRunning) {
+    logger.warn('Skipping DM poll: previous run still in flight');
+    return;
   }
+  dmLoopRunning = true;
+  try {
+    const pending = await listPendingDiscordDms();
+    if (pending.length === 0) return;
 
-  await markDiscordDmsSent(sentIds);
+    const sentIds: string[] = [];
+    for (const dm of pending) {
+      try {
+        await sendDiscordDm(dm.discordUserId, dm.message);
+      } catch (error) {
+        logger.error(`Failed to send Discord DM ${dm.id} to ${dm.discordUserId}`, error);
+      } finally {
+        sentIds.push(dm.id);
+      }
+    }
+
+    await markDiscordDmsSent(sentIds);
+  } finally {
+    dmLoopRunning = false;
+  }
 }
