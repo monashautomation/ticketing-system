@@ -590,8 +590,15 @@ async function resolveDiscordTicketOwner(
   if (existingByDiscordId) return { owner: existingByDiscordId, isNewUser: false };
 
   const directoryUser = await lookupDirectoryUserByDiscordUsername(discordUsername);
-  if (directoryUser) {
+  // Bind only when Directory has *verified* this Discord account: its discordUserId must
+  // equal the caller's. A username alone can be reused or spoofed, and adopting on it let
+  // another Discord user file tickets as a member and receive their messages (audit TIX-7).
+  if (directoryUser && directoryUser.discordUserId === discordUserId) {
     const existingByEmail = await prisma.user.findUnique({ where: { email: directoryUser.email } });
+    if (existingByEmail?.discordId && existingByEmail.discordId !== discordUserId) {
+      // Never overwrite a different, already-linked Discord account.
+      throw new AppError('This member is linked to a different Discord account');
+    }
     const owner = await prisma.user.upsert({
       where: { email: directoryUser.email },
       create: {
@@ -647,6 +654,11 @@ export async function createTicketFromDiscord(input: CreateInternalTicketInput, 
     // fresh access link without repeating the audit log, channel announcement, or DM (those
     // already fired on the original successful create).
     if (existing) {
+      // Only the original requester's retry gets a fresh link; anyone else replaying a
+      // key would otherwise mint access to someone else's ticket (audit TIX-5).
+      if (existing.createdById !== owner.id) {
+        throw new AppError('Idempotency key already used');
+      }
       const rawToken = randomBytes(32).toString('hex');
       await prisma.ticketAccessToken.create({
         data: {
