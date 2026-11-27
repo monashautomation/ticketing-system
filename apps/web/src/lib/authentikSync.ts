@@ -55,11 +55,17 @@ export async function syncAuthentikUsers(): Promise<{ upserted: number }> {
   const authentikUsers = await fetchAllAuthentikUsers();
   let upserted = 0;
 
+  // Emails that Authentik currently says are active admins. Anyone else holding
+  // role=admin locally is demoted below, so deactivated/removed admins (and their API
+  // tokens, which take the owner's current role) lose admin (audit TIX-2).
+  const activeAdminEmails = new Set<string>();
+
   for (const authentikUser of authentikUsers) {
     if (!authentikUser.is_active || !authentikUser.email) continue;
 
     const groupNames = (authentikUser.groups_obj ?? []).map((g) => g.name);
     const role = resolveRole(groupNames, env.adminGroups);
+    if (role === 'admin') activeAdminEmails.add(authentikUser.email.toLowerCase());
 
     await prisma.user.upsert({
       where: { email: authentikUser.email },
@@ -77,6 +83,15 @@ export async function syncAuthentikUsers(): Promise<{ upserted: number }> {
       },
     });
     upserted += 1;
+  }
+
+  // Guard against a partial/empty Authentik response demoting everyone.
+  if (authentikUsers.length > 0) {
+    const admins = await prisma.user.findMany({ where: { role: 'admin' }, select: { id: true, email: true } });
+    const stale = admins.filter((u) => !activeAdminEmails.has(u.email.toLowerCase())).map((u) => u.id);
+    if (stale.length > 0) {
+      await prisma.user.updateMany({ where: { id: { in: stale } }, data: { role: 'user' } });
+    }
   }
 
   await syncTicketGroupMembership();

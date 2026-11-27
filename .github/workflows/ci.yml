@@ -68,10 +68,21 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/ticketing-migrate:${{ steps.meta.outputs.sha }}
             ghcr.io/${{ github.repository_owner }}/ticketing-migrate:latest
 
+      # Pinned + checksum-verified (replaces `kustomize`, which ran an
+      # unpinned npm package while this job holds a token that can push to main).
+      - name: Install kustomize
+        env:
+          KUSTOMIZE_VERSION: v5.4.3
+          KUSTOMIZE_SHA256: 3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7
+        run: |
+          curl -fsSL -o /tmp/kustomize.tgz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          echo "${KUSTOMIZE_SHA256}  /tmp/kustomize.tgz" | sha256sum -c -
+          tar -xzf /tmp/kustomize.tgz -C /tmp kustomize
+          sudo install -m 0755 /tmp/kustomize /usr/local/bin/kustomize
       - name: Bump image tags for ArgoCD (GitOps commit)
         run: |
           cd deploy/overlays/prod
-          npx --yes kustomize edit set image \
+          kustomize edit set image \
             ghcr.io/${{ github.repository_owner }}/ticketing-web:${{ steps.meta.outputs.sha }} \
             ghcr.io/${{ github.repository_owner }}/ticketing-bot:${{ steps.meta.outputs.sha }} \
             ghcr.io/${{ github.repository_owner }}/ticketing-migrate:${{ steps.meta.outputs.sha }}
